@@ -1,7 +1,9 @@
-import requests
+import httpx
 from services.query_classifier import get_query_type
 from dotenv import load_dotenv
 import os
+from functools import lru_cache
+import hashlib
 
 load_dotenv(dotenv_path=".env")
 
@@ -18,6 +20,11 @@ TRUSTED_SITES = [
     "museumsofindia.gov.in"
 ]
 
+# Simple in-memory cache for web search results
+_search_cache = {}
+CACHE_SIZE = 100
+CACHE_TTL = 300  # 5 minutes in seconds
+
 def build_site_query(user_query):
 
     site_filters = " OR ".join([
@@ -27,7 +34,18 @@ def build_site_query(user_query):
 
     return f"{user_query} ({site_filters})"
 
-def search_web(query):
+def _get_cache_key(query: str) -> str:
+    """Generate cache key from query"""
+    return hashlib.md5(query.lower().strip().encode()).hexdigest()
+
+async def search_web(query):
+    """
+    Async web search with caching
+    """
+    # Check cache first
+    cache_key = _get_cache_key(query)
+    if cache_key in _search_cache:
+        return _search_cache[cache_key]
 
     query_type = get_query_type(query)
 
@@ -44,11 +62,13 @@ def search_web(query):
         "Content-Type": "application/json"
     }
 
-    response = requests.post(
-        url,
-        headers=headers,
-        json=payload
-    )
+    # Use async httpx client
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.post(
+            url,
+            headers=headers,
+            json=payload
+        )
 
     data = response.json()
 
@@ -80,6 +100,12 @@ def search_web(query):
 
         if query_type == "general" and len(results) >= 3:
             break
+
+    # Cache results (simple LRU)
+    if len(_search_cache) >= CACHE_SIZE:
+        # Remove oldest entry
+        _search_cache.pop(next(iter(_search_cache)))
+    _search_cache[cache_key] = results
 
     return results
 

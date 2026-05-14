@@ -1,4 +1,5 @@
 from langdetect import detect
+import re
 
 COMMON_ENGLISH_WORDS = [
     "where",
@@ -20,12 +21,22 @@ HINGLISH_WORDS = [
     "kya",
     "kaise",
     "kyun",
+    "kahan",  # where
+    "kab",    # when
+    "kaun",   # who
     "batao",
+    "bataiye",
     "mein",
     "acha",
     "nahi",
     "haan",
-    "aap"
+    "aap",
+    "koi",
+    "yeh",
+    "woh",
+    "tha",
+    "thi",
+    "the"
 ]
 
 
@@ -33,9 +44,13 @@ def detect_language(text: str):
 
     lower_text = text.lower()
 
-    # Hinglish detection
+    # Remove punctuation for better word matching
+    clean_text = re.sub(r'[^\w\s]', ' ', lower_text)
+
+    # Hinglish detection - check if any Hindi/Hinglish word is present
     for word in HINGLISH_WORDS:
-        if f" {word} " in f" {lower_text} ":
+        # Use word boundary regex for better matching
+        if re.search(r'\b' + re.escape(word) + r'\b', clean_text):
             return "hi"
 
     # English keyword detection
