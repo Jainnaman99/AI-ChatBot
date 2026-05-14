@@ -23,7 +23,7 @@ async def chat(req: ChatRequest):
 
     web_results = await search_web(req.message)
 
-    answer = generate_answer(
+    answer = await generate_answer(
         question=req.message,
         context=web_results,
         language=language
@@ -56,7 +56,7 @@ async def chat_with_context(req: ChatContextRequest):
     web_results = await search_web(req.message)
 
     # Generate answer with conversation context
-    answer = generate_context_aware_answer(
+    answer = await generate_context_aware_answer(
         question=req.message,
         context=web_results,
         language=language,
