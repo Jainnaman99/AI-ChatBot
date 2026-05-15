@@ -13,7 +13,4 @@ sse-starlette
 orjson
 langdetect
 sentence-transformers
-sse-starlette
-beautifulsoup4
-lxml
-httpx
+chromadb

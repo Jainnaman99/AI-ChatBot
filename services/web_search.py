@@ -15,7 +15,7 @@ TRUSTED_SITES = [
     # "abhilekh-patal.in",
     "culture.gov.in",
     # "gandhimuseum.org",
-    "indiaculture.gov.in",
+    # "indiaculture.gov.in",
     "vedicheritage.gov.in",
     "museumsofindia.gov.in"
 ]
