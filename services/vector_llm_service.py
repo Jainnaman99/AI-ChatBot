@@ -11,6 +11,11 @@ from typing import List, Dict
 from services.prompt_service import SYSTEM_PROMPT, build_user_prompt
 from services.context_prompt_service import SYSTEM_PROMPT as CONTEXT_SYSTEM_PROMPT, build_context_aware_prompt
 
+# Speed-optimized shorter system prompt for vector search (reduces context size)
+FAST_SYSTEM_PROMPT = """You are Ministry of Culture India AI assistant.
+Answer ONLY using provided context. If insufficient, say: "I could not find verified information."
+Be concise, factual, professional. Use same language as user."""
+
 # Response cache for vector search
 _vector_response_cache = {}
 VECTOR_CACHE_SIZE = 100
@@ -48,8 +53,9 @@ def _generate_vector_answer_sync(question, vector_results, language, conversatio
             "link": result.get("url", "")
         })
 
-    # Build appropriate prompt based on whether we have conversation history
+    # Build compact prompt for SPEED (shorter prompts = faster generation)
     if conversation_history:
+        # With history, use full prompts
         user_prompt = build_context_aware_prompt(
             question=question,
             language=language,
@@ -58,12 +64,13 @@ def _generate_vector_answer_sync(question, vector_results, language, conversatio
         )
         system_prompt = CONTEXT_SYSTEM_PROMPT
     else:
-        user_prompt = build_user_prompt(
-            question=question,
-            language=language,
-            context_items=context_items
-        )
-        system_prompt = SYSTEM_PROMPT
+        # Without history: use minimal prompt for MAXIMUM SPEED
+        context_text = "\n\n".join([
+            f"Source: {item['title']}\n{item['snippet'][:250]}"  # Limit snippet to 250 chars
+            for item in context_items[:3]  # Only top 3 results for speed
+        ])
+        user_prompt = f"Question: {question}\n\nContext:\n{context_text}\n\nAnswer briefly:"
+        system_prompt = FAST_SYSTEM_PROMPT
 
     # Build messages
     messages = [
@@ -88,13 +95,33 @@ def _generate_vector_answer_sync(question, vector_results, language, conversatio
         "content": user_prompt
     })
 
-    # Generate response
+    # Generate response - MAXIMUM SPEED OPTIMIZATION
+    # Will auto-switch to fastest available model once downloaded
+    # Priority: llama3.2:1b > qwen2.5:1.5b > llama3.2:latest > qwen2.5:3b
+
+    # Try fastest models first
+    import subprocess
+    available_models = subprocess.run(["ollama", "list"], capture_output=True, text=True).stdout
+
+    if "llama3.2:1b" in available_models:
+        model = "llama3.2:1b"  # Fastest - 1B params
+    elif "qwen2.5:1.5b" in available_models:
+        model = "qwen2.5:1.5b"  # Fast - 1.5B params
+    elif "llama3.2:latest" in available_models:
+        model = "llama3.2:latest"  # 3B params
+    else:
+        model = "qwen2.5:3b"  # Fallback
+
     response = ollama.chat(
-        model="qwen2.5:3b",
+        model=model,
         messages=messages,
         options={
             "temperature": 0.1,
-            "num_predict": 250
+            "num_predict": 80,   # Minimal tokens for speed
+            "num_ctx": 512,      # Absolute minimum context
+            "num_thread": 8,     # Max CPU threads
+            "num_batch": 512,    # Batch processing
+            "num_gpu": 0         # Force CPU (no GPU available)
         }
     )
 

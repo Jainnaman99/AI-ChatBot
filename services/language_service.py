@@ -35,8 +35,7 @@ HINGLISH_WORDS = [
     "yeh",
     "woh",
     "tha",
-    "thi",
-    "the"
+    "thi"
 ]
 
 
