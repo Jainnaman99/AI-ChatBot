@@ -95,24 +95,24 @@ def _generate_vector_answer_sync(question, vector_results, language, conversatio
         "content": user_prompt
     })
 
-    # Generate response - Balanced speed and accuracy
-    # Priority: Prefer 3B models for better accuracy, fallback to smaller for speed
-    # Priority: llama3.2:latest (3B) > qwen2.5:3b > qwen2.5:1.5b > llama3.2:1b
+    # Generate response - OPTIMIZED FOR SPEED
+    # Priority: qwen2.5:1.5b for best speed/accuracy balance
+    # Priority: qwen2.5:1.5b > qwen2.5:3b > llama3.2:latest > llama3.2:1b
 
-    # Try models in order of accuracy
+    # Try models in order of speed (prioritizing 1.5B for performance)
     import subprocess
     available_models = subprocess.run(["ollama", "list"], capture_output=True, text=True).stdout
 
-    if "llama3.2:latest" in available_models:
-        model = "llama3.2:latest"  # Best balance - 3B params
+    if "qwen2.5:1.5b" in available_models:
+        model = "qwen2.5:1.5b"  # BEST CHOICE - Fast (986 MB, 1.5B params) with good accuracy
     elif "qwen2.5:3b" in available_models:
-        model = "qwen2.5:3b"  # Good - 3B params
-    elif "qwen2.5:1.5b" in available_models:
-        model = "qwen2.5:1.5b"  # Fast - 1.5B params
+        model = "qwen2.5:3b"  # Fallback - Slower but more accurate
+    elif "llama3.2:latest" in available_models:
+        model = "llama3.2:latest"  # Fallback - 3B params
     elif "llama3.2:1b" in available_models:
-        model = "llama3.2:1b"  # Fastest but least accurate - 1B params
+        model = "llama3.2:1b"  # Last resort - Too weak for complex extraction
     else:
-        model = "qwen2.5:3b"  # Default fallback
+        model = "qwen2.5:1.5b"  # Default fallback
 
     response = ollama.chat(
         model=model,

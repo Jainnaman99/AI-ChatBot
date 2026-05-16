@@ -16,6 +16,7 @@ from services.streaming_llm_service import (
 from services.conversation_manager import conversation_manager
 from services.vector_search_service import get_vector_search_service
 from services.vector_llm_service import generate_vector_answer
+from services.translation_service import get_translation_service
 
 router = APIRouter()
 
@@ -352,11 +353,17 @@ async def chat_hybrid_context(req: ChatContextRequest):
     # Detect language
     language = detect_language(req.message)
 
+    # Get translation service
+    translator = get_translation_service()
+
+    # Translate query to English for better vector search (if not English)
+    english_query = translator.to_english(req.message, language) if language != "en" else req.message
+
     # Get vector search service
     vector_service = get_vector_search_service()
 
     # Enhance query with conversation context for vague queries
-    search_query = req.message
+    search_query = english_query
     if conversation_history and len(conversation_history) > 0:
         # Check if query is vague (pronouns, short queries, follow-up questions)
         vague_indicators = [
@@ -378,21 +385,25 @@ async def chat_hybrid_context(req: ChatContextRequest):
                 # Combine previous context with current query
                 search_query = f"{' '.join(recent_user_messages)} {req.message}"
 
-    # Try vector search first with higher similarity threshold
-    vector_results = await vector_service.search(search_query, top_k=5, min_similarity=0.65)
+    # Try vector search first with reasonable similarity threshold
+    vector_results = await vector_service.search(search_query, top_k=5, min_similarity=0.50)
 
     # Decide if vector results are good enough
-    # Consider results good if we have at least 2 results with similarity > 0.65
+    # Consider results good if we have at least 2 results with similarity > 0.50
     use_vector = vector_results and len(vector_results) >= 2
 
     if use_vector:
         # Vector search has good results - use them
-        answer = await generate_vector_answer(
-            question=req.message,
+        # Generate answer in English (vector DB has English content)
+        answer_english = await generate_vector_answer(
+            question=english_query,
             vector_results=vector_results,
-            language=language,
+            language="en",  # Force English for generation
             conversation_history=conversation_history
         )
+
+        # Translate answer back to original language
+        answer = translator.from_english(answer_english, language) if language != "en" else answer_english
 
         # Store conversation history
         conversation_manager.add_message(session_id, "user", req.message)

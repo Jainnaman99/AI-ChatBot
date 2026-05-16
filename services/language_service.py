@@ -69,16 +69,18 @@ def detect_language(text: str):
         # Prevent weird language detections
         allowed_languages = [
             "en",
-            "hi"
-            # ,
-            # "ta",
-            # "te",
-            # "bn",
-            # "pa",
-            # "ml",
-            # "mr",
-            # "gu",
-            # "kn"
+            "hi",
+            "ta",  # Tamil
+            "te",  # Telugu
+            "bn",  # Bengali
+            "pa",  # Punjabi
+            "ml",  # Malayalam
+            "mr",  # Marathi
+            "gu",  # Gujarati
+            "kn",  # Kannada
+            "as",  # Assamese
+            "or",  # Odia
+            "ur"   # Urdu
         ]
 
         if detected not in allowed_languages:
