@@ -2,6 +2,7 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from sse_starlette.sse import EventSourceResponse
 import json
+import time
 
 from models.chat_models import ChatRequest, ChatContextRequest
 from services.language_service import detect_language
@@ -197,6 +198,9 @@ async def chat_vector_with_context(req: ChatContextRequest):
     Chat with vector search AND conversation history
     Combines semantic search with conversation context
     """
+    # Start timing
+    start_time = time.time()
+
     # Generate session ID if not provided
     session_id = req.session_id or conversation_manager.generate_session_id()
 
@@ -257,12 +261,16 @@ async def chat_vector_with_context(req: ChatContextRequest):
             "relevance": result["similarity"]
         })
 
+    # Calculate response time
+    response_time = round(time.time() - start_time, 2)
+
     return {
         "session_id": session_id,
         "language": language,
         "answer": answer,
         "sources": sources,
-        "search_type": "vector"
+        "search_type": "vector",
+        "response_time_seconds": response_time
     }
 
 
@@ -316,6 +324,147 @@ async def chat_hybrid(req: ChatRequest):
             "answer": answer,
             "sources": web_results,
             "search_type": "web_fallback"
+        }
+
+
+@router.post("/chat-hybrid-context")
+async def chat_hybrid_context(req: ChatContextRequest):
+    """
+    Context-aware hybrid search with conversation history
+    1. First tries vector search from local database
+    2. If insufficient results, falls back to real-time web scraping
+    3. Maintains conversation context for follow-up questions
+
+    Best of both worlds:
+    - Fast responses from vector DB when data exists
+    - Comprehensive real-time data when local data is insufficient
+    - Full conversation context support
+    """
+    # Start timing
+    start_time = time.time()
+
+    # Generate session ID if not provided
+    session_id = req.session_id or conversation_manager.generate_session_id()
+
+    # Get conversation history
+    conversation_history = conversation_manager.get_history(session_id)
+
+    # Detect language
+    language = detect_language(req.message)
+
+    # Get vector search service
+    vector_service = get_vector_search_service()
+
+    # Enhance query with conversation context for vague queries
+    search_query = req.message
+    if conversation_history and len(conversation_history) > 0:
+        # Check if query is vague (pronouns, short queries, follow-up questions)
+        vague_indicators = [
+            "it", "that", "this", "they", "them", "more", "tell me", "what about",
+            "where", "when", "who", "how", "why", "which"  # Question words for follow-ups
+        ]
+
+        # Check if it's a short query (< 8 words) starting with question word or containing vague pronouns
+        is_short = len(req.message.split()) < 8
+        starts_with_question = any(req.message.lower().startswith(q) for q in ["where", "when", "who", "how", "why", "which", "what"])
+        has_vague_word = any(indicator in req.message.lower() for indicator in vague_indicators)
+
+        is_vague = is_short and (starts_with_question or has_vague_word)
+
+        if is_vague:
+            # Extract keywords from recent user messages (last 2 user messages)
+            recent_user_messages = [msg["content"] for msg in conversation_history if msg["role"] == "user"][-2:]
+            if recent_user_messages:
+                # Combine previous context with current query
+                search_query = f"{' '.join(recent_user_messages)} {req.message}"
+
+    # Try vector search first with higher similarity threshold
+    vector_results = await vector_service.search(search_query, top_k=5, min_similarity=0.65)
+
+    # Decide if vector results are good enough
+    # Consider results good if we have at least 2 results with similarity > 0.65
+    use_vector = vector_results and len(vector_results) >= 2
+
+    if use_vector:
+        # Vector search has good results - use them
+        answer = await generate_vector_answer(
+            question=req.message,
+            vector_results=vector_results,
+            language=language,
+            conversation_history=conversation_history
+        )
+
+        # Store conversation history
+        conversation_manager.add_message(session_id, "user", req.message)
+        conversation_manager.add_message(session_id, "assistant", answer)
+
+        # Format sources
+        sources = []
+        for result in vector_results:
+            sources.append({
+                "title": result["title"],
+                "snippet": result["text"][:200] + "..." if len(result["text"]) > 200 else result["text"],
+                "link": result["url"],
+                "relevance": result["similarity"]
+            })
+
+        # Calculate response time
+        response_time = round(time.time() - start_time, 2)
+
+        return {
+            "session_id": session_id,
+            "language": language,
+            "answer": answer,
+            "sources": sources,
+            "search_type": "vector",
+            "response_time_seconds": response_time
+        }
+    else:
+        # Vector search insufficient - fallback to real-time web search
+        web_results = await search_web(req.message)
+
+        # Generate answer with conversation context
+        # Build context for web results
+        context_items = web_results
+
+        if conversation_history:
+            # Use context-aware prompt
+            from services.context_prompt_service import build_context_aware_prompt
+            user_prompt = build_context_aware_prompt(
+                question=req.message,
+                language=language,
+                context_items=context_items,
+                conversation_history=conversation_history
+            )
+
+            # Generate with context
+            answer = await generate_answer(
+                question=req.message,
+                context=web_results,
+                language=language
+            )
+        else:
+            # No conversation history, use standard generation
+            answer = await generate_answer(
+                question=req.message,
+                context=web_results,
+                language=language
+            )
+
+        # Store conversation history
+        conversation_manager.add_message(session_id, "user", req.message)
+        conversation_manager.add_message(session_id, "assistant", answer)
+
+        # Calculate response time
+        response_time = round(time.time() - start_time, 2)
+
+        return {
+            "session_id": session_id,
+            "language": language,
+            "answer": answer,
+            "sources": web_results,
+            "search_type": "web_fallback",
+            "response_time_seconds": response_time
         }
 
 
