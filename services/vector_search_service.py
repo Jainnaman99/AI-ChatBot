@@ -21,8 +21,13 @@ class VectorSearchService:
             similarity_threshold: Minimum similarity score (0-1)
         """
         self.embedding_service = get_embedding_service()
-        self.vector_store = get_vector_store()
+        # Don't cache vector_store - get it dynamically to support TEST_MODE switching
         self.similarity_threshold = similarity_threshold
+
+    @property
+    def vector_store(self):
+        """Get vector store dynamically to support database switching"""
+        return get_vector_store()
 
     async def search(
         self,

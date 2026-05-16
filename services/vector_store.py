@@ -128,8 +128,9 @@ class VectorStore:
         print(f"Cleared collection: {self.collection_name}")
 
 
-# Global instance
+# Global instance and current directory
 _vector_store = None
+_current_persist_directory = None
 
 def get_vector_store(persist_directory: str = "./data/chroma_db") -> VectorStore:
     """
@@ -137,13 +138,26 @@ def get_vector_store(persist_directory: str = "./data/chroma_db") -> VectorStore
 
     Args:
         persist_directory: Directory to persist ChromaDB data
+            - Set TEST_MODE=1 environment variable to use ./data/chroma_db_test
 
     Returns:
         VectorStore instance
     """
-    global _vector_store
+    global _vector_store, _current_persist_directory
 
-    if _vector_store is None:
+    # Check for TEST_MODE environment variable
+    test_mode = os.environ.get("TEST_MODE", "0") == "1"
+
+    if test_mode:
+        # Use test database
+        persist_directory = "./data/chroma_db_test"
+        print("[TEST_MODE] Using test database: ./data/chroma_db_test")
+
+    # Create new instance if none exists OR if directory changed
+    if _vector_store is None or _current_persist_directory != persist_directory:
+        if _vector_store is not None:
+            print(f"Switching database from {_current_persist_directory} to {persist_directory}")
         _vector_store = VectorStore(persist_directory=persist_directory)
+        _current_persist_directory = persist_directory
 
     return _vector_store

@@ -74,7 +74,8 @@ class WebScraper:
         # Skip common non-content URLs and media files
         skip_patterns = [
             '/login', '/signup', '/register', '/admin',
-            '.pdf', '.doc', '.docx', '.xls', '.xlsx',
+            # '.pdf', '.doc', '.docx', '.xls', '.xlsx',
+            '.xls', '.xlsx',
             '.jpg', '.jpeg', '.png', '.gif', '.svg',
             '.mp4', '.mp3', '.wav', '.avi', '.mov', '.wmv',  # Video/audio files
             '.zip', '.rar', '.tar', '.gz',  # Archives

@@ -64,12 +64,12 @@ def _generate_vector_answer_sync(question, vector_results, language, conversatio
         )
         system_prompt = CONTEXT_SYSTEM_PROMPT
     else:
-        # Without history: use minimal prompt for MAXIMUM SPEED
+        # Without history: use compact prompt for speed while maintaining accuracy
         context_text = "\n\n".join([
-            f"Source: {item['title']}\n{item['snippet'][:250]}"  # Limit snippet to 250 chars
+            f"Source: {item['title']}\n{item['snippet'][:400]}"  # 400 chars for better context
             for item in context_items[:3]  # Only top 3 results for speed
         ])
-        user_prompt = f"Question: {question}\n\nContext:\n{context_text}\n\nAnswer briefly:"
+        user_prompt = f"Question: {question}\n\nContext:\n{context_text}\n\nProvide a clear, concise answer based on the context:"
         system_prompt = FAST_SYSTEM_PROMPT
 
     # Build messages
@@ -95,33 +95,35 @@ def _generate_vector_answer_sync(question, vector_results, language, conversatio
         "content": user_prompt
     })
 
-    # Generate response - MAXIMUM SPEED OPTIMIZATION
-    # Will auto-switch to fastest available model once downloaded
-    # Priority: llama3.2:1b > qwen2.5:1.5b > llama3.2:latest > qwen2.5:3b
+    # Generate response - Balanced speed and accuracy
+    # Priority: Prefer 3B models for better accuracy, fallback to smaller for speed
+    # Priority: llama3.2:latest (3B) > qwen2.5:3b > qwen2.5:1.5b > llama3.2:1b
 
-    # Try fastest models first
+    # Try models in order of accuracy
     import subprocess
     available_models = subprocess.run(["ollama", "list"], capture_output=True, text=True).stdout
 
-    if "llama3.2:1b" in available_models:
-        model = "llama3.2:1b"  # Fastest - 1B params
+    if "llama3.2:latest" in available_models:
+        model = "llama3.2:latest"  # Best balance - 3B params
+    elif "qwen2.5:3b" in available_models:
+        model = "qwen2.5:3b"  # Good - 3B params
     elif "qwen2.5:1.5b" in available_models:
         model = "qwen2.5:1.5b"  # Fast - 1.5B params
-    elif "llama3.2:latest" in available_models:
-        model = "llama3.2:latest"  # 3B params
+    elif "llama3.2:1b" in available_models:
+        model = "llama3.2:1b"  # Fastest but least accurate - 1B params
     else:
-        model = "qwen2.5:3b"  # Fallback
+        model = "qwen2.5:3b"  # Default fallback
 
     response = ollama.chat(
         model=model,
         messages=messages,
         options={
             "temperature": 0.1,
-            "num_predict": 80,   # Minimal tokens for speed
-            "num_ctx": 512,      # Absolute minimum context
-            "num_thread": 8,     # Max CPU threads
-            "num_batch": 512,    # Batch processing
-            "num_gpu": 0         # Force CPU (no GPU available)
+            "num_predict": 150,   # Increased for fuller answers (was 80)
+            "num_ctx": 1024,      # Increased context window (was 512)
+            "num_thread": 8,      # Max CPU threads
+            "num_batch": 512,     # Batch processing
+            "num_gpu": 0          # Force CPU (no GPU available)
         }
     )
 

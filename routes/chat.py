@@ -212,9 +212,18 @@ async def chat_vector_with_context(req: ChatContextRequest):
     # Enhance query with conversation context for vague queries
     search_query = req.message
     if conversation_history and len(conversation_history) > 0:
-        # Check if query is vague (pronouns, short queries without keywords)
-        vague_indicators = ["it", "that", "this", "they", "them", "more", "tell me", "what about"]
-        is_vague = any(indicator in req.message.lower() for indicator in vague_indicators) and len(req.message.split()) < 8
+        # Check if query is vague (pronouns, short queries, follow-up questions)
+        vague_indicators = [
+            "it", "that", "this", "they", "them", "more", "tell me", "what about",
+            "where", "when", "who", "how", "why", "which"  # Question words for follow-ups
+        ]
+
+        # Check if it's a short query (< 8 words) starting with question word or containing vague pronouns
+        is_short = len(req.message.split()) < 8
+        starts_with_question = any(req.message.lower().startswith(q) for q in ["where", "when", "who", "how", "why", "which", "what"])
+        has_vague_word = any(indicator in req.message.lower() for indicator in vague_indicators)
+
+        is_vague = is_short and (starts_with_question or has_vague_word)
 
         if is_vague:
             # Extract keywords from recent user messages (last 2 user messages)
