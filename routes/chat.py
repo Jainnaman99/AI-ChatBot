@@ -17,6 +17,7 @@ from services.conversation_manager import conversation_manager
 from services.vector_search_service import get_vector_search_service
 from services.vector_llm_service import generate_vector_answer
 from services.translation_service import get_translation_service
+from services.metrics_service import metrics_service
 
 router = APIRouter()
 
@@ -448,6 +449,7 @@ async def chat_hybrid_context(req: ChatContextRequest):
         conversation_manager.add_message(session_id, "user", req.message)
         conversation_manager.add_message(session_id, "assistant", reply)
         response_time = round(time.time() - start_time, 2)
+        metrics_service.record_request("conversational", response_time, session_id)
         return {
             "session_id": session_id,
             "language": language,
@@ -527,6 +529,7 @@ async def chat_hybrid_context(req: ChatContextRequest):
 
         # Calculate response time
         response_time = round(time.time() - start_time, 2)
+        metrics_service.record_request("vector", response_time, session_id)
 
         return {
             "session_id": session_id,
@@ -564,6 +567,7 @@ async def chat_hybrid_context(req: ChatContextRequest):
 
         # Calculate response time
         response_time = round(time.time() - start_time, 2)
+        metrics_service.record_request("web_fallback", response_time, session_id)
 
         return {
             "session_id": session_id,
@@ -660,6 +664,8 @@ async def search(req: SearchRequest):
                         "source": "web"
                     })
 
+        search_response_time = round(time.time() - start_time, 2)
+        metrics_service.record_request("vector", search_response_time, None)
         return {
             "query": req.query,
             "language": language,
@@ -671,7 +677,7 @@ async def search(req: SearchRequest):
             "page_size": page_size,
             "total_pages": math.ceil(len(all_vector) / page_size),
             "results": results,
-            "response_time_seconds": round(time.time() - start_time, 2)
+            "response_time_seconds": search_response_time
         }
 
     # Web fallback
@@ -720,6 +726,8 @@ async def search(req: SearchRequest):
             )
             answer = translator.from_english(answer_en, language) if language != "en" else answer_en
 
+    web_response_time = round(time.time() - start_time, 2)
+    metrics_service.record_request("web_fallback", web_response_time, None)
     return {
         "query": req.query,
         "language": language,
@@ -731,7 +739,7 @@ async def search(req: SearchRequest):
         "page_size": page_size,
         "total_pages": 1,
         "results": results,
-        "response_time_seconds": round(time.time() - start_time, 2)
+        "response_time_seconds": web_response_time
     }
 
 

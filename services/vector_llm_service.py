@@ -21,13 +21,25 @@ _JUNK_PATTERNS = [
     re.compile(r'\bSizeType\b', re.IGNORECASE),
 ]
 
+def _trim_to_sentence_start(text: str) -> str:
+    """If text starts mid-sentence (lowercase/mid-word), trim to the first clean sentence start."""
+    if not text:
+        return text
+    first = text[0]
+    if first.islower() or (not first.isalpha() and first not in ('"', "'")):
+        match = re.search(r'[.!?।]\s+([A-Z\"\'])', text)
+        if match:
+            return text[match.start(1):]
+    return text
+
 def _clean_retrieved_text(text: str) -> str:
-    """Strip document-metadata noise from vector DB snippets before sending to LLM."""
+    """Strip document-metadata noise and fix broken chunk starts."""
     for pattern in _JUNK_PATTERNS:
         text = pattern.sub('', text)
-    # Collapse runs of whitespace left behind
     text = re.sub(r'\s{2,}', ' ', text)
-    return text.strip()
+    text = text.strip()
+    text = _trim_to_sentence_start(text)
+    return text
 
 # Speed-optimized shorter system prompt for vector search (reduces context size)
 FAST_SYSTEM_PROMPT = """You are Ministry of Culture India AI assistant.

@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from routes.chat import router as chat_router
+from routes.metrics import router as metrics_router
 from dotenv import load_dotenv
 import os
 load_dotenv(dotenv_path=".env")
@@ -19,6 +20,7 @@ app.add_middleware(
 )
 
 app.include_router(chat_router)
+app.include_router(metrics_router)
 
 @app.get("/")
 async def root():

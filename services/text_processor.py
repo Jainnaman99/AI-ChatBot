@@ -133,8 +133,12 @@ class TextProcessor:
 
                 chunks.append(chunk_data)
 
-            # Move start position with overlap
-            start = end - self.chunk_overlap
+            # Move start to the next sentence boundary after (end - overlap),
+            # so chunks don't begin mid-word or mid-sentence.
+            overlap_start = end - self.chunk_overlap
+            look_ahead = text[overlap_start: overlap_start + self.chunk_overlap]
+            boundary = re.search(r'[.!?।]\s+([A-Z])', look_ahead)
+            start = overlap_start + boundary.start(1) if boundary else end
 
         return chunks
 
