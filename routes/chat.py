@@ -538,35 +538,25 @@ async def chat_hybrid_context(req: ChatContextRequest):
         }
     else:
         # Vector search insufficient - fallback to real-time web search
-        web_results = await search_web(req.message)
-
-        # Generate answer with conversation context
-        # Build context for web results
-        context_items = web_results
+        # Use english_query so Serper finds results on English Ministry websites
+        web_results = await search_web(english_query)
 
         if conversation_history:
-            # Use context-aware prompt
-            from services.context_prompt_service import build_context_aware_prompt
-            user_prompt = build_context_aware_prompt(
-                question=req.message,
+            answer = await generate_context_aware_answer(
+                question=english_query,
+                context=web_results,
                 language=language,
-                context_items=context_items,
                 conversation_history=conversation_history
             )
-
-            # Generate with context
-            answer = await generate_answer(
-                question=req.message,
-                context=web_results,
-                language=language
-            )
         else:
-            # No conversation history, use standard generation
             answer = await generate_answer(
-                question=req.message,
+                question=english_query,
                 context=web_results,
                 language=language
             )
+
+        # Translate answer back to user's language
+        answer = translator.from_english(answer, language) if language != "en" else answer
 
         # Store conversation history
         conversation_manager.add_message(session_id, "user", req.message)
