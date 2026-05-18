@@ -4,7 +4,7 @@ from sse_starlette.sse import EventSourceResponse
 import json
 import time
 
-from models.chat_models import ChatRequest, ChatContextRequest
+from models.chat_models import ChatRequest, ChatContextRequest, SearchRequest
 from services.language_service import detect_language
 from services.web_search import search_web
 from services.llm_service import generate_answer
@@ -573,6 +573,166 @@ async def chat_hybrid_context(req: ChatContextRequest):
             "search_type": "web_fallback",
             "response_time_seconds": response_time
         }
+
+
+_QUESTION_STARTERS = {
+    "where", "what", "who", "when", "why", "how", "which",
+    "tell", "explain", "describe", "list", "give", "show",
+    "kahan", "kya", "kaun", "kab", "kyun", "kaise", "batao", "bataiye"
+}
+
+def _is_question(query: str) -> bool:
+    """Return True if the query looks like a question needing an answer."""
+    q = query.strip()
+    if q.endswith("?"):
+        return True
+    first_word = q.lower().split()[0] if q else ""
+    return first_word in _QUESTION_STARTERS
+
+
+@router.post("/search")
+async def search(req: SearchRequest):
+    """
+    Search API — returns exact text chunks from vector DB or web, with source links.
+    If the query is a question, also generates an LLM answer on top of the results.
+    Supports pagination for vector results.
+    """
+    import math
+    from services.vector_llm_service import _clean_retrieved_text
+
+    start_time = time.time()
+
+    # Detect language and translate query to English for search
+    language = detect_language(req.query)
+    translator = get_translation_service()
+    english_query = translator.to_english(req.query, language) if language != "en" else req.query
+
+    is_question = _is_question(req.query)
+
+    # Pagination bounds
+    page = max(1, req.page)
+    page_size = min(max(1, req.page_size), 20)
+    offset = (page - 1) * page_size
+    fetch_k = max(offset + page_size, 30)
+
+    vector_service = get_vector_search_service()
+    raw_vector = await vector_service.search(english_query, top_k=fetch_k, min_similarity=0.45)
+    all_vector = [
+        r for r in raw_vector
+        if ".pdf" not in r["url"].lower()
+        and r["title"].strip().lower() != "untitled"
+        and len(r["text"].strip()) > 50
+    ]
+
+    if all_vector:
+        page_slice = all_vector[offset: offset + page_size]
+        results = []
+        for r in page_slice:
+            clean = _clean_retrieved_text(r["text"])
+            results.append({
+                "title": r["title"],
+                "text": clean,
+                "url": r["url"],
+                "relevance": r["similarity"],
+                "source": "vector"
+            })
+
+        answer = None
+        if is_question and page == 1:
+            # Generate LLM answer from top quality chunks
+            answer_en = await generate_vector_answer(
+                question=english_query,
+                vector_results=all_vector[:5],
+                language="en"
+            )
+            answer = translator.from_english(answer_en, language) if language != "en" else answer_en
+
+            # Supplement results with web sources so user has more to explore
+            web_results = await search_web(english_query, max_results=5)
+            seen_urls = {r["url"] for r in results}
+            for r in web_results:
+                if r.get("link") not in seen_urls:
+                    results.append({
+                        "title": r.get("title", ""),
+                        "text": r.get("snippet", ""),
+                        "url": r.get("link", ""),
+                        "relevance": None,
+                        "source": "web"
+                    })
+
+        return {
+            "query": req.query,
+            "language": language,
+            "query_type": "question" if is_question else "keyword",
+            "search_type": "vector",
+            "answer": answer,
+            "total_results": len(all_vector),
+            "page": page,
+            "page_size": page_size,
+            "total_pages": math.ceil(len(all_vector) / page_size),
+            "results": results,
+            "response_time_seconds": round(time.time() - start_time, 2)
+        }
+
+    # Web fallback
+    web_results = await search_web(english_query, max_results=page_size)
+    results = [
+        {
+            "title": r.get("title", ""),
+            "text": r.get("snippet", ""),
+            "url": r.get("link", ""),
+            "relevance": None,
+            "source": "web"
+        }
+        for r in web_results
+    ]
+
+    # For question queries, also pull broader vector results (lower threshold)
+    # to add as additional sources alongside the answer
+    answer = None
+    if is_question:
+        broader_vector = await vector_service.search(english_query, top_k=10, min_similarity=0.45)
+        broader_vector = [
+            r for r in broader_vector
+            if ".pdf" not in r["url"].lower()
+            and r["title"].strip().lower() != "untitled"
+            and len(r["text"].strip()) > 50
+        ]
+        if broader_vector:
+            seen_urls = {r["url"] for r in results}
+            for r in broader_vector:
+                if r["url"] not in seen_urls:
+                    clean = _clean_retrieved_text(r["text"])
+                    results.append({
+                        "title": r["title"],
+                        "text": clean,
+                        "url": r["url"],
+                        "relevance": r["similarity"],
+                        "source": "vector"
+                    })
+
+        if web_results or broader_vector:
+            context_for_llm = web_results if web_results else []
+            answer_en = await generate_answer(
+                question=english_query,
+                context=context_for_llm,
+                language="en"
+            )
+            answer = translator.from_english(answer_en, language) if language != "en" else answer_en
+
+    return {
+        "query": req.query,
+        "language": language,
+        "query_type": "question" if is_question else "keyword",
+        "search_type": "web_fallback",
+        "answer": answer,
+        "total_results": len(results),
+        "page": 1,
+        "page_size": page_size,
+        "total_pages": 1,
+        "results": results,
+        "response_time_seconds": round(time.time() - start_time, 2)
+    }
 
 
 @router.get("/vector-stats")

@@ -1,4 +1,5 @@
 import httpx
+from urllib.parse import urlparse
 from services.query_classifier import get_query_type
 from dotenv import load_dotenv
 import os
@@ -15,7 +16,7 @@ TRUSTED_SITES = [
     # "abhilekh-patal.in",
     "culture.gov.in",
     # "gandhimuseum.org",
-    # "indiaculture.gov.in",
+    "indianculture.gov.in",
     "vedicheritage.gov.in",
     "museumsofindia.gov.in"
 ]
@@ -24,6 +25,16 @@ TRUSTED_SITES = [
 _search_cache = {}
 CACHE_SIZE = 100
 CACHE_TTL = 300  # 5 minutes in seconds
+
+def _is_trusted_domain(url: str) -> bool:
+    """Return True only if URL's domain exactly matches a trusted site (no subdomains)."""
+    try:
+        netloc = urlparse(url).netloc.lower()
+        if netloc.startswith("www."):
+            netloc = netloc[4:]
+        return netloc in TRUSTED_SITES
+    except Exception:
+        return False
 
 def build_site_query(user_query):
 
@@ -38,16 +49,24 @@ def _get_cache_key(query: str) -> str:
     """Generate cache key from query"""
     return hashlib.md5(query.lower().strip().encode()).hexdigest()
 
-async def search_web(query):
+async def search_web(query, max_results: int = None):
     """
-    Async web search with caching
+    Async web search with caching.
+    max_results: override the default per-query-type cap (use for /search endpoint).
     """
-    # Check cache first
-    cache_key = _get_cache_key(query)
+    # Cache key includes max_results so different limits cache separately
+    cache_key = _get_cache_key(f"{query}:{max_results}")
     if cache_key in _search_cache:
         return _search_cache[cache_key]
 
     query_type = get_query_type(query)
+
+    # Default caps per query type (kept low for chat speed)
+    if max_results is None:
+        if query_type == "location":
+            max_results = 1
+        else:
+            max_results = 3
 
     search_query = build_site_query(query)
 
@@ -62,7 +81,6 @@ async def search_web(query):
         "Content-Type": "application/json"
     }
 
-    # Use async httpx client
     async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.post(
             url,
@@ -80,11 +98,13 @@ async def search_web(query):
 
         title = item.get("title", "").lower()
 
-        # Ignore artifact/object pages
         if "default title" in title:
             continue
 
         if "record" in item.get("link", ""):
+            continue
+
+        if not _is_trusted_domain(item.get("link", "")):
             continue
 
         results.append({
@@ -93,17 +113,11 @@ async def search_web(query):
             "link": item.get("link")
         })
 
-        # Only keep top 2 good results
-        # Dynamic limit
-        if query_type == "location" and len(results) >= 1:
+        if len(results) >= max_results:
             break
 
-        if query_type == "general" and len(results) >= 3:
-            break
-
-    # Cache results (simple LRU)
+    # Cache results
     if len(_search_cache) >= CACHE_SIZE:
-        # Remove oldest entry
         _search_cache.pop(next(iter(_search_cache)))
     _search_cache[cache_key] = results
 
