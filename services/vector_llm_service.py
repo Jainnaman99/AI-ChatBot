@@ -14,7 +14,7 @@ from services.context_prompt_service import SYSTEM_PROMPT as CONTEXT_SYSTEM_PROM
 # Speed-optimized shorter system prompt for vector search (reduces context size)
 FAST_SYSTEM_PROMPT = """You are Ministry of Culture India AI assistant.
 Answer ONLY using provided context. If insufficient, say: "I could not find verified information."
-Be concise, factual, professional. Use same language as user."""
+Be detailed, factual, professional. Provide comprehensive answers covering all relevant aspects. Use same language as user."""
 
 # Response cache for vector search
 _vector_response_cache = {}
@@ -66,10 +66,10 @@ def _generate_vector_answer_sync(question, vector_results, language, conversatio
     else:
         # Without history: use compact prompt for speed while maintaining accuracy
         context_text = "\n\n".join([
-            f"Source: {item['title']}\n{item['snippet'][:400]}"  # 400 chars for better context
-            for item in context_items[:3]  # Only top 3 results for speed
+            f"Source: {item['title']}\n{item['snippet'][:800]}"
+            for item in context_items[:5]
         ])
-        user_prompt = f"Question: {question}\n\nContext:\n{context_text}\n\nProvide a clear, concise answer based on the context:"
+        user_prompt = f"Question: {question}\n\nContext:\n{context_text}\n\nProvide a detailed, comprehensive answer covering all relevant information from the context:"
         system_prompt = FAST_SYSTEM_PROMPT
 
     # Build messages
@@ -103,24 +103,26 @@ def _generate_vector_answer_sync(question, vector_results, language, conversatio
     import subprocess
     available_models = subprocess.run(["ollama", "list"], capture_output=True, text=True).stdout
 
-    if "qwen2.5:1.5b" in available_models:
-        model = "qwen2.5:1.5b"  # BEST CHOICE - Fast (986 MB, 1.5B params) with good accuracy
-    elif "qwen2.5:3b" in available_models:
+    # if "qwen2.5:1.5b" in available_models:
+    #     model = "qwen2.5:1.5b"  # BEST CHOICE - Fast (986 MB, 1.5B params) with good accuracy
+    # elif "qwen2.5:3b" in available_models:
+    #     model = "qwen2.5:3b"  # Fallback - Slower but more accurate
+    # elif "llama3.2:latest" in available_models:
+    #     model = "llama3.2:latest"  # Fallback - 3B params
+    # elif "llama3.2:1b" in available_models:
+    #     model = "llama3.2:1b"  # Last resort - Too weak for complex extraction
+    # else:
+    #     model = "qwen2.5:1.5b"  # Default fallback
+    if "qwen2.5:3b" in available_models:
         model = "qwen2.5:3b"  # Fallback - Slower but more accurate
-    elif "llama3.2:latest" in available_models:
-        model = "llama3.2:latest"  # Fallback - 3B params
-    elif "llama3.2:1b" in available_models:
-        model = "llama3.2:1b"  # Last resort - Too weak for complex extraction
-    else:
-        model = "qwen2.5:1.5b"  # Default fallback
 
     response = ollama.chat(
         model=model,
         messages=messages,
         options={
             "temperature": 0.1,
-            "num_predict": 150,   # Increased for fuller answers (was 80)
-            "num_ctx": 1024,      # Increased context window (was 512)
+            "num_predict": 500,
+            "num_ctx": 2048,
             "num_thread": 8,      # Max CPU threads
             "num_batch": 512,     # Batch processing
             "num_gpu": 0          # Force CPU (no GPU available)

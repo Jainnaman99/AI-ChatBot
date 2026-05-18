@@ -14,3 +14,4 @@ orjson
 langdetect
 sentence-transformers
 chromadb
+deep_translator

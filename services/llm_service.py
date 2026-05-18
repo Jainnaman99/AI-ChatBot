@@ -44,7 +44,7 @@ def _generate_answer_sync(question, context, language):
         ],
         options={
             "temperature": 0.1,
-            "num_predict": 250  # Reduced from 300 for faster generation
+            "num_predict": 500
         }
     )
 

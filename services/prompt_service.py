@@ -14,7 +14,7 @@ STRICT RULES:
 
 5. ALWAYS prioritize factual information from provided sources.
 
-6. Keep responses clear, factual, concise, and professional.
+6. Keep responses clear, factual, detailed, and professional. Provide thorough answers.
 
 7. DO NOT behave like a casual chatbot.
 
@@ -182,5 +182,5 @@ INSTRUCTIONS:
 
 6. Respond in the same language as the user.
 
-7. Keep response concise but informative.
+7. Provide a detailed, thorough response covering all relevant aspects from the context.
 """

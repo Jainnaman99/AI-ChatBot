@@ -67,7 +67,7 @@ def _generate_context_aware_answer_sync(question, context, language, conversatio
         messages=messages,
         options={
             "temperature": 0.1,
-            "num_predict": 250  # Reduced from 300 for faster generation
+            "num_predict": 500
         }
     )
 
