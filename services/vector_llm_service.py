@@ -3,6 +3,7 @@ LLM service for vector search results
 Generates answers using vector-retrieved context
 """
 
+import re
 import ollama
 import asyncio
 import hashlib
@@ -11,10 +12,28 @@ from typing import List, Dict
 from services.prompt_service import SYSTEM_PROMPT, build_user_prompt
 from services.context_prompt_service import SYSTEM_PROMPT as CONTEXT_SYSTEM_PROMPT, build_context_aware_prompt
 
+# Patterns found in scraped Ministry table pages that confuse the LLM
+_JUNK_PATTERNS = [
+    re.compile(r'Published Year\s*:\s*\d{4}', re.IGNORECASE),
+    re.compile(r'SizeType\s*:\s*[\d.]+ MB', re.IGNORECASE),
+    re.compile(r'\bSize\s*:\s*[\d.]+ MB\b', re.IGNORECASE),
+    re.compile(r'\bViewTitle\s*:', re.IGNORECASE),
+    re.compile(r'\bSizeType\b', re.IGNORECASE),
+]
+
+def _clean_retrieved_text(text: str) -> str:
+    """Strip document-metadata noise from vector DB snippets before sending to LLM."""
+    for pattern in _JUNK_PATTERNS:
+        text = pattern.sub('', text)
+    # Collapse runs of whitespace left behind
+    text = re.sub(r'\s{2,}', ' ', text)
+    return text.strip()
+
 # Speed-optimized shorter system prompt for vector search (reduces context size)
 FAST_SYSTEM_PROMPT = """You are Ministry of Culture India AI assistant.
 Answer ONLY using provided context. If insufficient, say: "I could not find verified information."
-Be detailed, factual, professional. Provide comprehensive answers covering all relevant aspects. Use same language as user."""
+Be detailed, factual, professional. Provide comprehensive answers covering all relevant aspects. Use same language as user.
+CRITICAL: NEVER use "Published Year", "Size", or any document/file metadata as facts about museums or monuments. These refer to PDF files, not historical dates. Only state establishment years or founding dates if they are explicitly written as such in the source text."""
 
 # Response cache for vector search
 _vector_response_cache = {}
@@ -44,12 +63,12 @@ def _generate_vector_answer_sync(question, vector_results, language, conversatio
         Please try rephrasing your question.
         """
 
-    # Format vector results as context (similar to web search format)
+    # Format vector results as context — clean junk metadata before passing to LLM
     context_items = []
     for result in vector_results:
         context_items.append({
             "title": result.get("title", ""),
-            "snippet": result.get("text", ""),
+            "snippet": _clean_retrieved_text(result.get("text", "")),
             "link": result.get("url", "")
         })
 
@@ -69,7 +88,7 @@ def _generate_vector_answer_sync(question, vector_results, language, conversatio
             f"Source: {item['title']}\n{item['snippet'][:800]}"
             for item in context_items[:5]
         ])
-        user_prompt = f"Question: {question}\n\nContext:\n{context_text}\n\nProvide a detailed, comprehensive answer covering all relevant information from the context:"
+        user_prompt = f"Question: {question}\n\nContext:\n{context_text}\n\nProvide a detailed, comprehensive answer covering all relevant information from the context. WARNING: Fields like 'Published Year', 'Size', 'SizeType' in the context are document/file metadata — do NOT use them as establishment dates, founding years, or museum facts. Only use facts that are explicitly stated as such."
         system_prompt = FAST_SYSTEM_PROMPT
 
     # Build messages

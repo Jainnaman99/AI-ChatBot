@@ -63,6 +63,13 @@ class TextProcessor:
         # Remove excessive whitespace
         text = re.sub(r'\s+', ' ', text)
 
+        # Strip document/file metadata patterns that appear in scraped Ministry tables
+        # e.g. "Published Year:2014" "SizeType: 14.2 MB" "Size: 17.9 MB" "ViewTitle:"
+        text = re.sub(r'Published Year\s*:\s*\d{4}', '', text)
+        text = re.sub(r'SizeType\s*:\s*[\d.]+ MB', '', text)
+        text = re.sub(r'\bSize\s*:\s*[\d.]+ MB\b', '', text)
+        text = re.sub(r'\bViewTitle\s*:', '', text)
+
         # Remove special characters but keep basic punctuation
         text = re.sub(r'[^\w\s.,!?;:()\-\'\"।]', '', text)
 

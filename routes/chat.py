@@ -20,6 +20,93 @@ from services.translation_service import get_translation_service
 
 router = APIRouter()
 
+# ---------------------------------------------------------------------------
+# Conversational intent detection
+# ---------------------------------------------------------------------------
+
+_GREETINGS = {
+    "hi", "hey", "hello", "hola", "howdy", "greetings", "sup", "heya",
+    "namaste", "namaskar", "salam", "assalamualaikum", "jai hind",
+    "good morning", "good afternoon", "good evening", "good night",
+}
+
+_THANKS = {
+    "thanks", "thank you", "thankyou", "thank u", "thx", "ty",
+    "dhanyawad", "shukriya", "bahut shukriya", "bahut dhanyawad",
+}
+
+_FAREWELLS = {
+    "bye", "goodbye", "good bye", "see you", "see ya", "later", "take care",
+    "alvida", "phir milenge",
+}
+
+_HOW_ARE_YOU = {
+    "how are you", "how r u", "how are u", "hows it going", "how's it going",
+    "what's up", "whats up", "wassup",
+}
+
+_WHAT_CAN_YOU_DO = {
+    "what can you do", "what do you do", "who are you", "what are you",
+    "tell me about yourself", "help", "help me",
+}
+
+def _normalise(text: str) -> str:
+    import re
+    return re.sub(r"[^\w\s]", "", text.lower()).strip()
+
+def detect_conversational_intent(message: str):
+    """
+    Returns (intent, reply) if the message is purely conversational,
+    or (None, None) if it should go through the normal search pipeline.
+    intent can be: 'greeting' | 'thanks' | 'farewell' | 'how_are_you' | 'what_can_you_do'
+    """
+    norm = _normalise(message)
+
+    if norm in _GREETINGS or any(norm.startswith(g) for g in _GREETINGS):
+        return "greeting", (
+            "Hello! Welcome to the Ministry of Culture India Assistant. 🙏\n\n"
+            "I can help you with:\n"
+            "• Information about Indian cultural heritage, monuments, and museums\n"
+            "• Government schemes and programs by the Ministry of Culture\n"
+            "• Details about festivals, art forms, and cultural events\n"
+            "• Information about archaeological sites and protected monuments\n\n"
+            "Feel free to ask me anything about India's rich culture and heritage!"
+        )
+
+    if norm in _HOW_ARE_YOU or any(norm.startswith(h) for h in _HOW_ARE_YOU):
+        return "how_are_you", (
+            "I'm doing great and ready to help! 😊\n\n"
+            "I'm the Ministry of Culture India Assistant. You can ask me about "
+            "Indian heritage, monuments, museums, cultural schemes, festivals, and much more.\n\n"
+            "What would you like to know today?"
+        )
+
+    if norm in _WHAT_CAN_YOU_DO or any(norm.startswith(w) for w in _WHAT_CAN_YOU_DO):
+        return "what_can_you_do", (
+            "I'm the official AI Assistant for the Ministry of Culture, India. Here's what I can help you with:\n\n"
+            "🏛️ **Monuments & Heritage Sites** — Taj Mahal, Qutub Minar, Hampi, and more\n"
+            "🏺 **Museums** — National Museum, regional museums, and their collections\n"
+            "🎭 **Art & Culture** — Classical dance, music, folk arts, and crafts\n"
+            "📜 **Government Schemes** — Cultural grants, fellowships, and programs\n"
+            "🎉 **Festivals & Events** — National festivals and cultural events\n"
+            "🌐 **Intangible Heritage** — UNESCO-listed traditions and practices\n\n"
+            "Just ask your question and I'll find the most accurate information for you!"
+        )
+
+    if norm in _THANKS or any(norm.startswith(t) for t in _THANKS):
+        return "thanks", (
+            "You're welcome! 😊 I'm happy to help.\n\n"
+            "Feel free to ask if you have more questions about Indian culture, heritage, or Ministry of Culture schemes."
+        )
+
+    if norm in _FAREWELLS or any(norm.startswith(f) for f in _FAREWELLS):
+        return "farewell", (
+            "Goodbye! It was a pleasure assisting you. 🙏\n\n"
+            "Come back anytime you have questions about India's culture and heritage. Jai Hind!"
+        )
+
+    return None, None
+
 @router.post("/chat")
 async def chat(req: ChatRequest):
 
@@ -353,6 +440,23 @@ async def chat_hybrid_context(req: ChatContextRequest):
     # Detect language
     language = detect_language(req.message)
 
+    # --- Conversational short-circuit ---
+    intent, greeting_reply = detect_conversational_intent(req.message)
+    if intent:
+        translator = get_translation_service()
+        reply = translator.from_english(greeting_reply, language) if language != "en" else greeting_reply
+        conversation_manager.add_message(session_id, "user", req.message)
+        conversation_manager.add_message(session_id, "assistant", reply)
+        response_time = round(time.time() - start_time, 2)
+        return {
+            "session_id": session_id,
+            "language": language,
+            "answer": reply,
+            "sources": [],
+            "search_type": "conversational",
+            "response_time_seconds": response_time
+        }
+
     # Get translation service
     translator = get_translation_service()
 
@@ -409,12 +513,14 @@ async def chat_hybrid_context(req: ChatContextRequest):
         conversation_manager.add_message(session_id, "user", req.message)
         conversation_manager.add_message(session_id, "assistant", answer)
 
-        # Format sources
+        # Format sources — import inline to avoid circular deps
+        from services.vector_llm_service import _clean_retrieved_text
         sources = []
         for result in vector_results:
+            clean = _clean_retrieved_text(result["text"])
             sources.append({
                 "title": result["title"],
-                "snippet": result["text"][:200] + "..." if len(result["text"]) > 200 else result["text"],
+                "snippet": clean[:200] + "..." if len(clean) > 200 else clean,
                 "link": result["url"],
                 "relevance": result["similarity"]
             })

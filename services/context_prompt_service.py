@@ -49,6 +49,10 @@ STRICT RULES:
 17. Use conversation history to understand context references like "it", "that place", "the scheme mentioned earlier".
 
 18. Maintain conversation continuity while staying factual.
+
+19. NEVER use "Published Year", "Size", "SizeType", or any file/document metadata from the context as facts about museums, monuments, or cultural institutions. These fields describe PDF documents on the website, NOT historical dates or physical sizes of places.
+
+20. NEVER state a museum or monument's establishment/founding year unless it is explicitly written as such in the source text. If unsure, omit the date entirely.
 """
 
 
