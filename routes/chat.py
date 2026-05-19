@@ -464,7 +464,7 @@ async def chat_hybrid_context(req: ChatContextRequest, request: Request):
         conversation_manager.add_message(session_id, "user", req.message)
         conversation_manager.add_message(session_id, "assistant", reply)
         response_time = round(time.time() - start_time, 2)
-        metrics_service.record_request("conversational", response_time, session_id, client_ip, language, req.message, None)
+        metrics_service.record_request("conversational", response_time, session_id, client_ip, language, english_query, None)
         return {
             "session_id": session_id,
             "language": language,
@@ -507,10 +507,10 @@ async def chat_hybrid_context(req: ChatContextRequest, request: Request):
                 search_query = f"{' '.join(recent_user_messages)} {req.message}"
 
     # Try vector search first with reasonable similarity threshold
-    vector_results = await vector_service.search(search_query, top_k=5, min_similarity=0.50)
+    vector_results = await vector_service.search(search_query, top_k=5, min_similarity=0.55)
 
     # Decide if vector results are good enough
-    # Consider results good if we have at least 2 results with similarity > 0.50
+    # Consider results good if we have at least 2 results with similarity > 0.55
     use_vector = vector_results and len(vector_results) >= 2
 
     if use_vector:
@@ -609,6 +609,21 @@ def _is_question(query: str) -> bool:
     return first_word in _QUESTION_STARTERS
 
 
+async def _translate_results(results: list, language: str, translator) -> list:
+    """Translate result text snippets to the target language in parallel."""
+    if language == "en":
+        return results
+    import asyncio
+    async def _tr(text: str) -> str:
+        if not text:
+            return text
+        return await asyncio.to_thread(translator.from_english, text, language)
+    translated_texts = await asyncio.gather(*[_tr(r["text"]) for r in results])
+    for r, t in zip(results, translated_texts):
+        r["text"] = t
+    return results
+
+
 @router.post("/search")
 async def search(req: SearchRequest, request: Request):
     """
@@ -636,7 +651,7 @@ async def search(req: SearchRequest, request: Request):
     fetch_k = max(offset + page_size, 20)
 
     vector_service = get_vector_search_service()
-    raw_vector = await vector_service.search(english_query, top_k=fetch_k, min_similarity=0.50)
+    raw_vector = await vector_service.search(english_query, top_k=fetch_k, min_similarity=0.55)
     all_vector = [
         r for r in raw_vector
         if ".pdf" not in r["url"].lower()
@@ -660,7 +675,7 @@ async def search(req: SearchRequest, request: Request):
         answer = None
         if is_question and page == 1:
             # Use only high-confidence chunks for LLM answer generation
-            llm_chunks = [r for r in all_vector if r["similarity"] >= 0.55] or all_vector[:3]
+            llm_chunks = [r for r in all_vector if r["similarity"] >= 0.65] or all_vector[:3]
             answer_en = await generate_vector_answer(
                 question=english_query,
                 vector_results=llm_chunks[:5],
@@ -680,6 +695,9 @@ async def search(req: SearchRequest, request: Request):
                         "relevance": None,
                         "source": "web"
                     })
+
+        if language != "en":
+            results = await _translate_results(results, language, translator)
 
         search_response_time = round(time.time() - start_time, 2)
         metrics_service.record_request("vector", search_response_time, None, client_ip, language, english_query, _primary_domain(results))
@@ -714,7 +732,7 @@ async def search(req: SearchRequest, request: Request):
     # to add as additional sources alongside the answer
     answer = None
     if is_question:
-        broader_vector = await vector_service.search(english_query, top_k=10, min_similarity=0.50)
+        broader_vector = await vector_service.search(english_query, top_k=10, min_similarity=0.55)
         broader_vector = [
             r for r in broader_vector
             if ".pdf" not in r["url"].lower()
@@ -742,6 +760,9 @@ async def search(req: SearchRequest, request: Request):
                 language="en"
             )
             answer = translator.from_english(answer_en, language) if language != "en" else answer_en
+
+    if language != "en":
+        results = await _translate_results(results, language, translator)
 
     web_response_time = round(time.time() - start_time, 2)
     metrics_service.record_request("web_fallback", web_response_time, None, client_ip, language, english_query, _primary_domain(results))

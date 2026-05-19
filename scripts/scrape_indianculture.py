@@ -6,9 +6,9 @@ Standard HTTP scraping returns empty shells. This script:
   1. Opens each seed URL in a real headless Chromium browser
   2. Intercepts the JSON API responses the browser receives automatically
   3. Extracts meaningful text from the JSON payloads
-  4. Chunks, embeds, and stores in chroma_db_test
+  4. Chunks, embeds, and stores in chroma_db
 
-Stores vectors in : ./data/chroma_db_test
+Stores vectors in : ./data/chroma_db
 Collection name   : ministry_culture_kb (default)
 
 Usage:
@@ -229,7 +229,7 @@ async def ingest(max_pages: int = 200, clear_existing: bool = False):
 
     text_processor    = get_text_processor(chunk_size=800, chunk_overlap=100)
     embedding_service = get_embedding_service(model_name="all-MiniLM-L6-v2")
-    vector_store      = get_vector_store(persist_directory="./data/chroma_db_test")
+    vector_store      = get_vector_store(persist_directory="./data/chroma_db")
 
     if clear_existing:
         print("\nClearing existing test collection...")
@@ -281,7 +281,7 @@ async def ingest(max_pages: int = 200, clear_existing: bool = False):
 
     # Step 4: Store
     print(f"\n{'-'*60}")
-    print("STEP 4: STORING IN chroma_db_test")
+    print("STEP 4: STORING IN chroma_db")
     print(f"{'-'*60}")
 
     now_iso   = datetime.now().isoformat()
@@ -321,7 +321,7 @@ async def ingest(max_pages: int = 200, clear_existing: bool = False):
     stats = vector_store.get_collection_stats()
     print(f"  Collection : {stats['name']}")
     print(f"  Total docs : {stats['count']}")
-    print(f"  Location   : ./data/chroma_db_test")
+    print(f"  Location   : ./data/chroma_db")
 
     test_q   = "classical dance forms India"
     test_emb = embedding_service.generate_embedding(test_q)
@@ -340,18 +340,18 @@ async def ingest(max_pages: int = 200, clear_existing: bool = False):
     print(f"  Pages scraped  : {len(scraped)}")
     print(f"  Chunks created : {len(all_chunks)}")
     print(f"  Docs in DB     : {stats['count']}")
-    print(f"\n  chroma_db_test is ready.\n")
+    print(f"\n  chroma_db is ready.\n")
 
 
 def main():
     import argparse
     parser = argparse.ArgumentParser(
-        description="Scrape indianculture.gov.in and ingest into chroma_db_test"
+        description="Scrape indianculture.gov.in and ingest into chroma_db"
     )
     parser.add_argument("--max-pages", type=int, default=200,
                         help="Max pages to scrape (default: 25 seed URLs)")
     parser.add_argument("--clear", action="store_true",
-                        help="Clear existing chroma_db_test collection first")
+                        help="Clear existing chroma_db collection first")
     args = parser.parse_args()
 
     try:

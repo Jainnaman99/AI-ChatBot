@@ -196,16 +196,21 @@ class MetricsService:
 
     # ── Topic categories for keyword matching ──────────────────────────────
     _TOPIC_CATEGORIES = {
-        "Historical Monuments":  ["monument", "fort", "temple", "mahal", "minar", "palace", "ruins", "qutub", "taj", "hampi", "ajanta", "ellora", "khajuraho"],
-        "Museums & Galleries":   ["museum", "gallery", "collection", "exhibit", "artifact", "national museum", "salar jung"],
-        "Classical Dance Forms": ["dance", "bharatnatyam", "kathak", "odissi", "kuchipudi", "manipuri", "mohiniyattam", "classical dance"],
-        "Vedic Heritage":        ["vedic", "veda", "upanishad", "sanskrit", "ritual", "vedic tradition", "mantra", "scripture"],
-        "UNESCO World Heritage": ["unesco", "world heritage", "intangible heritage", "inscription"],
-        "National Archives":     ["archive", "manuscript", "document", "record", "abhilekh", "patal"],
-        "Freedom Movement":      ["freedom", "independence", "gandhi", "nehru", "revolution", "1857", "struggle"],
-        "Art & Craft":           ["art", "craft", "painting", "sculpture", "folk art", "handicraft", "warli", "madhubani"],
-        "Festivals & Events":    ["festival", "event", "celebration", "mela", "utsav", "cultural event"],
-        "Music":                 ["music", "raga", "classical music", "instrument", "carnatic", "hindustani", "tabla", "sitar"],
+        "Historical Monuments":  ["monument", "fort", "temple", "mahal", "minar", "palace", "ruins", "qutub", "taj", "hampi", "ajanta", "ellora", "khajuraho", "heritage site", "ancient", "archaeological"],
+        "Museums & Galleries":   ["museum", "gallery", "collection", "exhibit", "artifact", "national museum", "salar jung", "victoria memorial", "ngma", "allahabad museum"],
+        "Classical Dance Forms": ["dance", "bharatnatyam", "kathak", "odissi", "kuchipudi", "manipuri", "mohiniyattam", "classical dance", "folk dance", "performer", "performing arts"],
+        "Vedic Heritage":        ["vedic", "veda", "upanishad", "sanskrit", "ritual", "vedic tradition", "mantra", "scripture", "rigveda", "samaveda", "yajurveda", "atharvaveda"],
+        "UNESCO World Heritage": ["unesco", "world heritage", "intangible heritage", "inscription", "heritage list"],
+        "National Archives":     ["archive", "manuscript", "document", "record", "abhilekh", "patal", "rare book", "inscription"],
+        "Freedom Movement":      ["freedom", "independence", "gandhi", "nehru", "revolution", "1857", "struggle", "freedom fighter", "partition"],
+        "Art & Craft":           ["art", "craft", "painting", "sculpture", "folk art", "handicraft", "warli", "madhubani", "pottery", "weaving", "textile"],
+        "Festivals & Events":    ["festival", "event", "celebration", "mela", "utsav", "cultural event", "exhibition", "diwali", "holi", "navratri", "durga puja"],
+        "Music":                 ["music", "raga", "classical music", "instrument", "carnatic", "hindustani", "tabla", "sitar", "vocalist", "musician"],
+        "Schemes & Grants":      ["scheme", "grant", "scholarship", "fellowship", "award", "funding", "financial assistance", "yojana", "stipend"],
+        "Tenders & Procurement": ["tender", "bid", "procurement", "rfp", "quotation", "contract", "notice inviting tender", "nit", "expression of interest", "eoi"],
+        "Personalities":         ["who is", "biography", "artist", "author", "writer", "poet", "sculptor", "personality", "eminent"],
+        "Architecture":          ["architecture", "architectural", "style", "structure", "building", "construction", "design", "indo-saracenic", "mughal architecture"],
+        "Literature":            ["literature", "poetry", "poem", "novel", "book", "author", "writing", "literary", "language"],
     }
 
     def get_top_topics(self, limit: int = 10, date: str = None) -> dict:

@@ -69,12 +69,6 @@ def _generate_vector_answer_sync(question, vector_results, language, conversatio
     Returns:
         Generated answer string
     """
-    if not vector_results:
-        return """
-        I could not find verified information from trusted Ministry of Culture sources for this query.
-        Please try rephrasing your question.
-        """
-
     # Format vector results as context — clean junk metadata before passing to LLM
     context_items = []
     for result in vector_results:
@@ -162,39 +156,53 @@ def _generate_vector_answer_sync(question, vector_results, language, conversatio
 
     return response["message"]["content"]
 
+_FALLBACK_PHRASE = "could not find verified information"
+
+
+async def _web_search_fallback(question: str, language: str) -> str:
+    """Search trusted sites via web and generate an answer from the results."""
+    from services.web_search import search_web
+    from services.llm_service import generate_answer
+
+    web_results = await search_web(question, max_results=5)
+    if web_results:
+        return await generate_answer(question=question, context=web_results, language=language)
+    return (
+        "I could not find relevant information about this topic from trusted "
+        "Ministry of Culture sources. Please try rephrasing your question."
+    )
+
+
 async def generate_vector_answer(question, vector_results, language, conversation_history=None):
     """
-    Async wrapper for LLM generation with vector search results
-
-    Args:
-        question: User question
-        vector_results: Vector search results
-        language: Detected language
-        conversation_history: Optional conversation history
-
-    Returns:
-        Generated answer string
+    Async wrapper for LLM generation with vector search results.
+    Falls back to trusted-site web search if vector context is absent or insufficient.
     """
-    # Check cache (only cache if no conversation history)
     history_len = len(conversation_history) if conversation_history else 0
     cache_key = _get_cache_key(question, language, history_len)
 
     if history_len == 0 and cache_key in _vector_response_cache:
         return _vector_response_cache[cache_key]
 
-    # Run blocking ollama call in thread pool
-    answer = await asyncio.to_thread(
-        _generate_vector_answer_sync,
-        question,
-        vector_results,
-        language,
-        conversation_history
-    )
+    # No vector results at all — go straight to web search
+    if not vector_results:
+        answer = await _web_search_fallback(question, language)
+    else:
+        answer = await asyncio.to_thread(
+            _generate_vector_answer_sync,
+            question,
+            vector_results,
+            language,
+            conversation_history
+        )
+        # LLM couldn't answer from context — retry with web search
+        if _FALLBACK_PHRASE in answer.lower():
+            web_answer = await _web_search_fallback(question, language)
+            if web_answer:
+                answer = web_answer
 
-    # Cache response (only if no history)
     if history_len == 0:
         if len(_vector_response_cache) >= VECTOR_CACHE_SIZE:
-            # Remove oldest entry
             _vector_response_cache.pop(next(iter(_vector_response_cache)))
         _vector_response_cache[cache_key] = answer
 
