@@ -621,10 +621,10 @@ async def search(req: SearchRequest, request: Request):
     page = max(1, req.page)
     page_size = min(max(1, req.page_size), 20)
     offset = (page - 1) * page_size
-    fetch_k = max(offset + page_size, 30)
+    fetch_k = max(offset + page_size, 20)
 
     vector_service = get_vector_search_service()
-    raw_vector = await vector_service.search(english_query, top_k=fetch_k, min_similarity=0.45)
+    raw_vector = await vector_service.search(english_query, top_k=fetch_k, min_similarity=0.50)
     all_vector = [
         r for r in raw_vector
         if ".pdf" not in r["url"].lower()
@@ -647,10 +647,11 @@ async def search(req: SearchRequest, request: Request):
 
         answer = None
         if is_question and page == 1:
-            # Generate LLM answer from top quality chunks
+            # Use only high-confidence chunks for LLM answer generation
+            llm_chunks = [r for r in all_vector if r["similarity"] >= 0.55] or all_vector[:3]
             answer_en = await generate_vector_answer(
                 question=english_query,
-                vector_results=all_vector[:5],
+                vector_results=llm_chunks[:5],
                 language="en"
             )
             answer = translator.from_english(answer_en, language) if language != "en" else answer_en
@@ -701,7 +702,7 @@ async def search(req: SearchRequest, request: Request):
     # to add as additional sources alongside the answer
     answer = None
     if is_question:
-        broader_vector = await vector_service.search(english_query, top_k=10, min_similarity=0.45)
+        broader_vector = await vector_service.search(english_query, top_k=10, min_similarity=0.50)
         broader_vector = [
             r for r in broader_vector
             if ".pdf" not in r["url"].lower()
