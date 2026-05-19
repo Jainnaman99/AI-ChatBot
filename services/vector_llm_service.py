@@ -130,16 +130,16 @@ def _generate_vector_answer_sync(question, vector_results, language, conversatio
 
     # if "qwen2.5:1.5b" in available_models:
     #     model = "qwen2.5:1.5b"  # BEST CHOICE - Fast (986 MB, 1.5B params) with good accuracy
-    # elif "qwen2.5:3b" in available_models:
-    #     model = "qwen2.5:3b"  # Fallback - Slower but more accurate
-    # elif "llama3.2:latest" in available_models:
-    #     model = "llama3.2:latest"  # Fallback - 3B params
-    # elif "llama3.2:1b" in available_models:
-    #     model = "llama3.2:1b"  # Last resort - Too weak for complex extraction
-    # else:
-    #     model = "qwen2.5:1.5b"  # Default fallback
     if "qwen2.5:3b" in available_models:
         model = "qwen2.5:3b"  # Fallback - Slower but more accurate
+    elif "llama3.2:latest" in available_models:
+        model = "llama3.2:latest"  # Fallback - 3B params
+    # elif "llama3.2:1b" in available_models:
+    #     model = "llama3.2:1b"  # Last resort - Too weak for complex extraction
+    else:
+        model = "qwen2.5:3b"  # Default fallback
+    # if "qwen2.5:3b" in available_models:
+    #     model = "qwen2.5:3b"  # Fallback - Slower but more accurate
 
     response = ollama.chat(
         model=model,
