@@ -236,7 +236,9 @@ class MetricsService:
         rows = self._fetch_rows(date, columns="language")
         lang_counts: dict[str, int] = {}
         for r in rows:
-            lang = r["language"] or "unknown"
+            lang = r["language"]
+            if not lang:  # skip rows with no language data (old records)
+                continue
             lang_counts[lang] = lang_counts.get(lang, 0) + 1
 
         total = sum(lang_counts.values()) or 1
