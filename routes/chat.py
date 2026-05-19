@@ -18,6 +18,18 @@ from services.vector_search_service import get_vector_search_service
 from services.vector_llm_service import generate_vector_answer
 from services.translation_service import get_translation_service
 from services.metrics_service import metrics_service
+from urllib.parse import urlparse as _urlparse
+
+def _primary_domain(sources: list) -> str:
+    """Extract domain from the first source result."""
+    if not sources:
+        return None
+    url = sources[0].get("link") or sources[0].get("url", "")
+    try:
+        netloc = _urlparse(url).netloc.lower()
+        return netloc[4:] if netloc.startswith("www.") else netloc or None
+    except Exception:
+        return None
 
 router = APIRouter()
 
@@ -452,7 +464,7 @@ async def chat_hybrid_context(req: ChatContextRequest, request: Request):
         conversation_manager.add_message(session_id, "user", req.message)
         conversation_manager.add_message(session_id, "assistant", reply)
         response_time = round(time.time() - start_time, 2)
-        metrics_service.record_request("conversational", response_time, session_id, client_ip)
+        metrics_service.record_request("conversational", response_time, session_id, client_ip, language, req.message, None)
         return {
             "session_id": session_id,
             "language": language,
@@ -532,7 +544,7 @@ async def chat_hybrid_context(req: ChatContextRequest, request: Request):
 
         # Calculate response time
         response_time = round(time.time() - start_time, 2)
-        metrics_service.record_request("vector", response_time, session_id, client_ip)
+        metrics_service.record_request("vector", response_time, session_id, client_ip, language, english_query, _primary_domain(sources))
 
         return {
             "session_id": session_id,
@@ -570,7 +582,7 @@ async def chat_hybrid_context(req: ChatContextRequest, request: Request):
 
         # Calculate response time
         response_time = round(time.time() - start_time, 2)
-        metrics_service.record_request("web_fallback", response_time, session_id, client_ip)
+        metrics_service.record_request("web_fallback", response_time, session_id, client_ip, language, english_query, _primary_domain(web_results))
 
         return {
             "session_id": session_id,
@@ -670,7 +682,7 @@ async def search(req: SearchRequest, request: Request):
                     })
 
         search_response_time = round(time.time() - start_time, 2)
-        metrics_service.record_request("vector", search_response_time, None, client_ip)
+        metrics_service.record_request("vector", search_response_time, None, client_ip, language, english_query, _primary_domain(results))
         return {
             "query": req.query,
             "language": language,
@@ -732,7 +744,7 @@ async def search(req: SearchRequest, request: Request):
             answer = translator.from_english(answer_en, language) if language != "en" else answer_en
 
     web_response_time = round(time.time() - start_time, 2)
-    metrics_service.record_request("web_fallback", web_response_time, None, client_ip)
+    metrics_service.record_request("web_fallback", web_response_time, None, client_ip, language, english_query, _primary_domain(results))
     return {
         "query": req.query,
         "language": language,

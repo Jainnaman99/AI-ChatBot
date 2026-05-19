@@ -30,12 +30,25 @@ class MetricsService:
                     search_type   TEXT    NOT NULL,
                     response_time REAL,
                     session_id    TEXT,
-                    client_ip     TEXT
+                    client_ip     TEXT,
+                    language      TEXT,
+                    query_text    TEXT,
+                    source_domain TEXT
                 )
             """)
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_timestamp ON requests(timestamp)"
             )
+            # Migrate existing DB — add new columns if they don't exist yet
+            for col, col_type in [
+                ("language",      "TEXT"),
+                ("query_text",    "TEXT"),
+                ("source_domain", "TEXT"),
+            ]:
+                try:
+                    self._conn.execute(f"ALTER TABLE requests ADD COLUMN {col} {col_type}")
+                except Exception:
+                    pass  # column already exists
             self._conn.commit()
 
     def record_request(
@@ -44,12 +57,17 @@ class MetricsService:
         response_time: float,
         session_id: str = None,
         client_ip: str = None,
+        language: str = None,
+        query_text: str = None,
+        source_domain: str = None,
     ) -> None:
         with self._lock:
             self._conn.execute(
-                "INSERT INTO requests (timestamp, search_type, response_time, session_id, client_ip) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (time.time(), search_type, response_time, session_id, client_ip),
+                "INSERT INTO requests "
+                "(timestamp, search_type, response_time, session_id, client_ip, language, query_text, source_domain) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (time.time(), search_type, response_time, session_id, client_ip,
+                 language, query_text, source_domain),
             )
             self._conn.commit()
 
@@ -175,6 +193,114 @@ class MetricsService:
             },
         }
 
+
+    # ── Topic categories for keyword matching ──────────────────────────────
+    _TOPIC_CATEGORIES = {
+        "Historical Monuments":  ["monument", "fort", "temple", "mahal", "minar", "palace", "ruins", "qutub", "taj", "hampi", "ajanta", "ellora", "khajuraho"],
+        "Museums & Galleries":   ["museum", "gallery", "collection", "exhibit", "artifact", "national museum", "salar jung"],
+        "Classical Dance Forms": ["dance", "bharatnatyam", "kathak", "odissi", "kuchipudi", "manipuri", "mohiniyattam", "classical dance"],
+        "Vedic Heritage":        ["vedic", "veda", "upanishad", "sanskrit", "ritual", "vedic tradition", "mantra", "scripture"],
+        "UNESCO World Heritage": ["unesco", "world heritage", "intangible heritage", "inscription"],
+        "National Archives":     ["archive", "manuscript", "document", "record", "abhilekh", "patal"],
+        "Freedom Movement":      ["freedom", "independence", "gandhi", "nehru", "revolution", "1857", "struggle"],
+        "Art & Craft":           ["art", "craft", "painting", "sculpture", "folk art", "handicraft", "warli", "madhubani"],
+        "Festivals & Events":    ["festival", "event", "celebration", "mela", "utsav", "cultural event"],
+        "Music":                 ["music", "raga", "classical music", "instrument", "carnatic", "hindustani", "tabla", "sitar"],
+    }
+
+    def get_top_topics(self, limit: int = 10, date: str = None) -> dict:
+        """Return top searched topic categories with counts."""
+        rows = self._fetch_rows(date, columns="query_text")
+        queries = [r["query_text"].lower() for r in rows if r["query_text"]]
+
+        counts: dict[str, int] = {cat: 0 for cat in self._TOPIC_CATEGORIES}
+        for q in queries:
+            for category, keywords in self._TOPIC_CATEGORIES.items():
+                if any(kw in q for kw in keywords):
+                    counts[category] += 1
+
+        sorted_topics = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+        total = sum(c for _, c in sorted_topics) or 1
+
+        return {
+            "date": date or "all",
+            "topics": [
+                {"topic": cat, "count": cnt, "pct": round(cnt / total * 100, 1)}
+                for cat, cnt in sorted_topics[:limit]
+                if cnt > 0
+            ],
+        }
+
+    def get_language_distribution(self, date: str = None) -> dict:
+        """Return language breakdown with counts and percentages."""
+        rows = self._fetch_rows(date, columns="language")
+        lang_counts: dict[str, int] = {}
+        for r in rows:
+            lang = r["language"] or "unknown"
+            lang_counts[lang] = lang_counts.get(lang, 0) + 1
+
+        total = sum(lang_counts.values()) or 1
+
+        # Group minor languages into "Other"
+        PRIMARY = {"en": "English", "hi": "Hindi"}
+        result = {label: 0 for label in PRIMARY.values()}
+        other = 0
+        for lang, cnt in lang_counts.items():
+            if lang in PRIMARY:
+                result[PRIMARY[lang]] += cnt
+            else:
+                other += cnt
+
+        distribution = [
+            {"language": lang, "count": cnt, "pct": round(cnt / total * 100, 1)}
+            for lang, cnt in result.items()
+        ]
+        if other:
+            distribution.append({"language": "Other", "count": other, "pct": round(other / total * 100, 1)})
+
+        distribution.sort(key=lambda x: x["count"], reverse=True)
+        return {"date": date or "all", "total": total, "distribution": distribution}
+
+    def get_portal_queries(self, date: str = None) -> dict:
+        """Return source domain breakdown with counts and percentages."""
+        rows = self._fetch_rows(date, columns="source_domain")
+        domain_counts: dict[str, int] = {}
+        for r in rows:
+            domain = r["source_domain"]
+            if domain:
+                domain_counts[domain] = domain_counts.get(domain, 0) + 1
+
+        total = sum(domain_counts.values()) or 1
+        sorted_domains = sorted(domain_counts.items(), key=lambda x: x[1], reverse=True)
+
+        return {
+            "date": date or "all",
+            "total": total,
+            "portals": [
+                {"domain": domain, "count": cnt, "pct": round(cnt / total * 100, 1)}
+                for domain, cnt in sorted_domains
+            ],
+        }
+
+    def _fetch_rows(self, date: str = None, columns: str = "*") -> list:
+        """Fetch rows for a given date (or all time if date is None)."""
+        if date:
+            try:
+                day_dt = datetime.datetime.strptime(date, "%Y-%m-%d")
+                day_start = day_dt.timestamp()
+                day_end = day_start + 86_400
+                with self._lock:
+                    cursor = self._conn.execute(
+                        f"SELECT {columns} FROM requests WHERE timestamp >= ? AND timestamp < ?",
+                        (day_start, day_end),
+                    )
+            except ValueError:
+                with self._lock:
+                    cursor = self._conn.execute(f"SELECT {columns} FROM requests")
+        else:
+            with self._lock:
+                cursor = self._conn.execute(f"SELECT {columns} FROM requests")
+        return [dict(r) for r in cursor.fetchall()]
 
     def get_traffic_data(self, date: str = None) -> dict:
         """

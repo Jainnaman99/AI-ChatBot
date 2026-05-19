@@ -64,3 +64,37 @@ async def get_response_time(
     - sla_threshold: constant value for the SLA reference line
     """
     return metrics_service.get_response_time_data(date=date, sla_threshold=sla_threshold)
+
+
+@router.get("/top-topics")
+async def get_top_topics(
+    limit: int = Query(default=10, description="Number of top topics to return."),
+    date: Optional[str] = Query(default=None, description="YYYY-MM-DD. Omit for all-time."),
+):
+    """
+    Return top searched cultural topic categories with counts and percentages.
+    Topics are matched using keyword classification against predefined categories.
+    """
+    return metrics_service.get_top_topics(limit=limit, date=date)
+
+
+@router.get("/language-distribution")
+async def get_language_distribution(
+    date: Optional[str] = Query(default=None, description="YYYY-MM-DD. Omit for all-time."),
+):
+    """
+    Return breakdown of query languages (English / Hindi / Other) with counts and percentages.
+    Suitable for a donut/pie chart.
+    """
+    return metrics_service.get_language_distribution(date=date)
+
+
+@router.get("/portal-queries")
+async def get_portal_queries(
+    date: Optional[str] = Query(default=None, description="YYYY-MM-DD. Omit for all-time."),
+):
+    """
+    Return source portal (domain) breakdown — which Ministry websites answered queries.
+    Sorted by query count descending with percentages.
+    """
+    return metrics_service.get_portal_queries(date=date)
