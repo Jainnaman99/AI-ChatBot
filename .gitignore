@@ -38,3 +38,5 @@ data/
 *.bin
 *.parquet
 debug_*.html
+*.db-shm
+*.db-wal
