@@ -40,3 +40,27 @@ async def get_traffic(
     - users: unique IPs per hour
     """
     return metrics_service.get_traffic_data(date=date)
+
+
+@router.get("/response-time")
+async def get_response_time(
+    date: Optional[str] = Query(
+        default=None,
+        description="Date in YYYY-MM-DD format. Defaults to today.",
+    ),
+    sla_threshold: float = Query(
+        default=3.0,
+        description="SLA threshold in seconds for the horizontal reference line.",
+    ),
+):
+    """
+    Return hourly average and P95 response time for a given day.
+    Suitable for a dual-line chart with a fixed SLA reference line.
+
+    Response includes:
+    - labels: ['00:00', '01:00', ..., '23:00']
+    - avg: mean response time per hour (null if no requests that hour)
+    - p95: 95th percentile response time per hour (null if no requests)
+    - sla_threshold: constant value for the SLA reference line
+    """
+    return metrics_service.get_response_time_data(date=date, sla_threshold=sla_threshold)

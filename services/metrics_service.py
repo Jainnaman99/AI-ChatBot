@@ -223,5 +223,64 @@ class MetricsService:
         }
 
 
+    def get_response_time_data(self, date: str = None, sla_threshold: float = 3.0) -> dict:
+        """
+        Return hourly avg and P95 response time for a given date.
+        date: 'YYYY-MM-DD' string, defaults to today.
+        sla_threshold: horizontal SLA line value in seconds (default 3.0).
+        """
+        if date:
+            try:
+                day_dt = datetime.datetime.strptime(date, "%Y-%m-%d")
+            except ValueError:
+                day_dt = datetime.datetime.now().replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                )
+        else:
+            day_dt = datetime.datetime.now().replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+
+        day_start = day_dt.timestamp()
+        day_end = day_start + 86_400
+
+        with self._lock:
+            cursor = self._conn.execute(
+                "SELECT timestamp, response_time FROM requests "
+                "WHERE timestamp >= ? AND timestamp < ? AND response_time IS NOT NULL",
+                (day_start, day_end),
+            )
+            rows = [dict(r) for r in cursor.fetchall()]
+
+        # Build 24 hourly buckets
+        buckets: list[list[float]] = [[] for _ in range(24)]
+
+        for r in rows:
+            hour = int((r["timestamp"] - day_start) // 3600)
+            if 0 <= hour < 24:
+                buckets[hour].append(r["response_time"])
+
+        avg_per_hour = []
+        p95_per_hour = []
+
+        for times in buckets:
+            if times:
+                avg_per_hour.append(round(sum(times) / len(times), 2))
+                sorted_times = sorted(times)
+                p95_idx = max(0, int(0.95 * len(sorted_times)) - 1)
+                p95_per_hour.append(round(sorted_times[p95_idx], 2))
+            else:
+                avg_per_hour.append(None)
+                p95_per_hour.append(None)
+
+        return {
+            "date": day_dt.strftime("%Y-%m-%d"),
+            "sla_threshold": sla_threshold,
+            "labels": [f"{h:02d}:00" for h in range(24)],
+            "avg": avg_per_hour,
+            "p95": p95_per_hour,
+        }
+
+
 # Singleton used by all routes
 metrics_service = MetricsService()
