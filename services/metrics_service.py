@@ -176,5 +176,52 @@ class MetricsService:
         }
 
 
+    def get_traffic_data(self, date: str = None) -> dict:
+        """
+        Return hourly query count and unique user (IP) count for a given date.
+        date: 'YYYY-MM-DD' string, defaults to today.
+        """
+        if date:
+            try:
+                day_dt = datetime.datetime.strptime(date, "%Y-%m-%d")
+            except ValueError:
+                day_dt = datetime.datetime.now().replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                )
+        else:
+            day_dt = datetime.datetime.now().replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+
+        day_start = day_dt.timestamp()
+        day_end = day_start + 86_400
+
+        with self._lock:
+            cursor = self._conn.execute(
+                "SELECT timestamp, client_ip FROM requests "
+                "WHERE timestamp >= ? AND timestamp < ?",
+                (day_start, day_end),
+            )
+            rows = [dict(r) for r in cursor.fetchall()]
+
+        # Build 24 hourly buckets
+        queries = [0] * 24
+        users: list[set] = [set() for _ in range(24)]
+
+        for r in rows:
+            hour = int((r["timestamp"] - day_start) // 3600)
+            if 0 <= hour < 24:
+                queries[hour] += 1
+                if r["client_ip"]:
+                    users[hour].add(r["client_ip"])
+
+        return {
+            "date": day_dt.strftime("%Y-%m-%d"),
+            "labels": [f"{h:02d}:00" for h in range(24)],
+            "queries": queries,
+            "users": [len(u) for u in users],
+        }
+
+
 # Singleton used by all routes
 metrics_service = MetricsService()
