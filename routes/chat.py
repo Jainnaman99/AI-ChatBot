@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from sse_starlette.sse import EventSourceResponse
 import json
@@ -417,7 +417,7 @@ async def chat_hybrid(req: ChatRequest):
 
 
 @router.post("/chat-hybrid-context")
-async def chat_hybrid_context(req: ChatContextRequest):
+async def chat_hybrid_context(req: ChatContextRequest, request: Request):
     """
     Context-aware hybrid search with conversation history
     1. First tries vector search from local database
@@ -438,6 +438,9 @@ async def chat_hybrid_context(req: ChatContextRequest):
     # Get conversation history
     conversation_history = conversation_manager.get_history(session_id)
 
+    # Extract client IP for active-user tracking
+    client_ip = request.client.host if request.client else None
+
     # Detect language
     language = detect_language(req.message)
 
@@ -449,7 +452,7 @@ async def chat_hybrid_context(req: ChatContextRequest):
         conversation_manager.add_message(session_id, "user", req.message)
         conversation_manager.add_message(session_id, "assistant", reply)
         response_time = round(time.time() - start_time, 2)
-        metrics_service.record_request("conversational", response_time, session_id)
+        metrics_service.record_request("conversational", response_time, session_id, client_ip)
         return {
             "session_id": session_id,
             "language": language,
@@ -529,7 +532,7 @@ async def chat_hybrid_context(req: ChatContextRequest):
 
         # Calculate response time
         response_time = round(time.time() - start_time, 2)
-        metrics_service.record_request("vector", response_time, session_id)
+        metrics_service.record_request("vector", response_time, session_id, client_ip)
 
         return {
             "session_id": session_id,
@@ -567,7 +570,7 @@ async def chat_hybrid_context(req: ChatContextRequest):
 
         # Calculate response time
         response_time = round(time.time() - start_time, 2)
-        metrics_service.record_request("web_fallback", response_time, session_id)
+        metrics_service.record_request("web_fallback", response_time, session_id, client_ip)
 
         return {
             "session_id": session_id,
@@ -595,7 +598,7 @@ def _is_question(query: str) -> bool:
 
 
 @router.post("/search")
-async def search(req: SearchRequest):
+async def search(req: SearchRequest, request: Request):
     """
     Search API — returns exact text chunks from vector DB or web, with source links.
     If the query is a question, also generates an LLM answer on top of the results.
@@ -605,6 +608,7 @@ async def search(req: SearchRequest):
     from services.vector_llm_service import _clean_retrieved_text
 
     start_time = time.time()
+    client_ip = request.client.host if request.client else None
 
     # Detect language and translate query to English for search
     language = detect_language(req.query)
@@ -665,7 +669,7 @@ async def search(req: SearchRequest):
                     })
 
         search_response_time = round(time.time() - start_time, 2)
-        metrics_service.record_request("vector", search_response_time, None)
+        metrics_service.record_request("vector", search_response_time, None, client_ip)
         return {
             "query": req.query,
             "language": language,
@@ -727,7 +731,7 @@ async def search(req: SearchRequest):
             answer = translator.from_english(answer_en, language) if language != "en" else answer_en
 
     web_response_time = round(time.time() - start_time, 2)
-    metrics_service.record_request("web_fallback", web_response_time, None)
+    metrics_service.record_request("web_fallback", web_response_time, None, client_ip)
     return {
         "query": req.query,
         "language": language,

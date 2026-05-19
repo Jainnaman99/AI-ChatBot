@@ -1,52 +1,79 @@
 """
-In-memory metrics tracking for dashboard KPIs.
-Thread-safe; records are kept in a bounded deque (last 10 000 requests).
+Persistent metrics tracking for dashboard KPIs.
+Uses SQLite so data survives server restarts.
+Thread-safe via a single Lock around all DB operations.
 """
 
 import time
+import sqlite3
 import datetime
-from collections import deque
 from threading import Lock
+
+DB_PATH = "metrics.db"
 
 
 class MetricsService:
     def __init__(self):
         self._start_time = time.time()
         self._lock = Lock()
-        # Each entry: {timestamp, search_type, response_time, session_id}
-        self._requests: deque = deque(maxlen=10_000)
+        self._conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._setup_db()
+
+    def _setup_db(self):
+        with self._lock:
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("""
+                CREATE TABLE IF NOT EXISTS requests (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp     REAL    NOT NULL,
+                    search_type   TEXT    NOT NULL,
+                    response_time REAL,
+                    session_id    TEXT,
+                    client_ip     TEXT
+                )
+            """)
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_timestamp ON requests(timestamp)"
+            )
+            self._conn.commit()
 
     def record_request(
         self,
         search_type: str,
         response_time: float,
         session_id: str = None,
+        client_ip: str = None,
     ) -> None:
         with self._lock:
-            self._requests.append(
-                {
-                    "timestamp": time.time(),
-                    "search_type": search_type,
-                    "response_time": response_time,
-                    "session_id": session_id,
-                }
+            self._conn.execute(
+                "INSERT INTO requests (timestamp, search_type, response_time, session_id, client_ip) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (time.time(), search_type, response_time, session_id, client_ip),
             )
+            self._conn.commit()
 
     def get_kpis(self) -> dict:
-        with self._lock:
-            now = time.time()
-            all_reqs = list(self._requests)
-
+        now = time.time()
         today_dt = datetime.datetime.now().replace(
             hour=0, minute=0, second=0, microsecond=0
         )
         today_start = today_dt.timestamp()
         yesterday_start = today_start - 86_400
+        window_30m = now - 1_800
+        window_5m = now - 300
 
-        today_reqs = [r for r in all_reqs if r["timestamp"] >= today_start]
-        yesterday_reqs = [
-            r for r in all_reqs if yesterday_start <= r["timestamp"] < today_start
-        ]
+        # Single query covers today + yesterday (all we need for KPIs)
+        with self._lock:
+            cursor = self._conn.execute(
+                "SELECT timestamp, search_type, response_time, session_id, client_ip "
+                "FROM requests WHERE timestamp >= ?",
+                (yesterday_start,),
+            )
+            rows = [dict(r) for r in cursor.fetchall()]
+
+        today_reqs = [r for r in rows if r["timestamp"] >= today_start]
+        yesterday_reqs = [r for r in rows if yesterday_start <= r["timestamp"] < today_start]
 
         # --- 1. Total Queries ---
         total_today = len(today_reqs)
@@ -57,36 +84,24 @@ class MetricsService:
             else 0.0
         )
 
-        # --- 2. Active Users (session-based) ---
-        window_30m = now - 1_800
-        window_5m = now - 300
-        active_sessions = {
-            r["session_id"]
-            for r in all_reqs
-            if r["timestamp"] >= window_30m and r["session_id"]
+        # --- 2. Active Users (IP-based) ---
+        active_ips = {
+            r["client_ip"]
+            for r in rows
+            if r["timestamp"] >= window_30m and r["client_ip"]
         }
-        concurrent_sessions = {
-            r["session_id"]
-            for r in all_reqs
-            if r["timestamp"] >= window_5m and r["session_id"]
+        concurrent_ips = {
+            r["client_ip"]
+            for r in rows
+            if r["timestamp"] >= window_5m and r["client_ip"]
         }
 
         # --- 3. Avg Response Time ---
-        today_times = [
-            r["response_time"]
-            for r in today_reqs
-            if r["response_time"] is not None
-        ]
-        yesterday_times = [
-            r["response_time"]
-            for r in yesterday_reqs
-            if r["response_time"] is not None
-        ]
+        today_times = [r["response_time"] for r in today_reqs if r["response_time"] is not None]
+        yesterday_times = [r["response_time"] for r in yesterday_reqs if r["response_time"] is not None]
 
         avg_rt_today = sum(today_times) / len(today_times) if today_times else 0.0
-        avg_rt_yesterday = (
-            sum(yesterday_times) / len(yesterday_times) if yesterday_times else 0.0
-        )
+        avg_rt_yesterday = sum(yesterday_times) / len(yesterday_times) if yesterday_times else 0.0
 
         p95_rt = 0.0
         if today_times:
@@ -100,7 +115,7 @@ class MetricsService:
             else 0.0
         )
 
-        # --- 4. RAG Accuracy (vector hits / non-conversational today) ---
+        # --- 4. RAG Accuracy ---
         non_conv = [r for r in today_reqs if r["search_type"] != "conversational"]
         vector_hits = [r for r in non_conv if r["search_type"] == "vector"]
         rag_accuracy = (
@@ -109,16 +124,14 @@ class MetricsService:
 
         # --- 5. Chatbot Sessions ---
         today_sessions = {r["session_id"] for r in today_reqs if r["session_id"]}
-        session_turn_counts: dict[str, int] = {}
+        session_turn_counts: dict = {}
         for r in today_reqs:
             if r["session_id"]:
                 session_turn_counts[r["session_id"]] = (
                     session_turn_counts.get(r["session_id"], 0) + 1
                 )
         avg_turns = (
-            round(
-                sum(session_turn_counts.values()) / len(session_turn_counts), 1
-            )
+            round(sum(session_turn_counts.values()) / len(session_turn_counts), 1)
             if session_turn_counts
             else 0.0
         )
@@ -136,8 +149,8 @@ class MetricsService:
                 "change_pct": query_change_pct,
             },
             "active_users": {
-                "active_30min": len(active_sessions),
-                "concurrent_5min": len(concurrent_sessions),
+                "active_30min": len(active_ips),
+                "concurrent_5min": len(concurrent_ips),
             },
             "avg_response_time": {
                 "mean_seconds": round(avg_rt_today, 2),
