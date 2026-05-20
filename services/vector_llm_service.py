@@ -19,7 +19,25 @@ _JUNK_PATTERNS = [
     re.compile(r'\bSize\s*:\s*[\d.]+ MB\b', re.IGNORECASE),
     re.compile(r'\bViewTitle\s*:', re.IGNORECASE),
     re.compile(r'\bSizeType\b', re.IGNORECASE),
+    # Empty collection-browser pages from museumsofindia.gov.in
+    re.compile(r'\d+\s+records\s+Browse\s+Records', re.IGNORECASE),
+    re.compile(r"We couldn'?t find any matches[!.]?", re.IGNORECASE),
+    re.compile(r'\d+\s*-\s*\d+\s+of\s+\d+\s+records', re.IGNORECASE),
+    re.compile(r'Show more\s*\d*\s*records?', re.IGNORECASE),
+    re.compile(r'Browse\s+Records', re.IGNORECASE),
+    re.compile(r'National Portal\s*(?:&|and)?\s*Digital Repository', re.IGNORECASE),
+    re.compile(r'Filters\s+Clear\s+all\s+State\s+Museum\s+Type\s+Owner', re.IGNORECASE),
+    re.compile(r'Search\s+Results\s+\d+\s+\d+\s+\d+\s+\d+', re.IGNORECASE),
+    re.compile(r'Explore\s+Collection\s+Searchable\s+PDF', re.IGNORECASE),
 ]
+
+# Minimum useful content length after cleaning — chunks shorter than this are discarded
+_MIN_CHUNK_LENGTH = 60
+
+
+def _is_useful_chunk(text: str) -> bool:
+    """Return False if the chunk is essentially empty or all boilerplate after cleaning."""
+    return len(text.strip()) >= _MIN_CHUNK_LENGTH
 
 def _trim_to_sentence_start(text: str) -> str:
     """If text starts mid-sentence (lowercase/mid-word), trim to the first clean sentence start."""
@@ -43,10 +61,12 @@ def _clean_retrieved_text(text: str) -> str:
 
 # Speed-optimized shorter system prompt for vector search (reduces context size)
 FAST_SYSTEM_PROMPT = """You are Ministry of Culture India AI assistant.
-Answer ONLY using provided context. Say "I could not find verified information." ONLY when context is completely absent or irrelevant — NOT when you have partial information.
-Be detailed, factual, professional. Provide comprehensive answers covering all relevant aspects. Use same language as user.
-For tenders, schemes, or lists: share ALL items found in the context and include the source URL at the end so the user can view the full list.
-CRITICAL: NEVER use "Published Year", "Size", or any document/file metadata as facts about museums or monuments. These refer to PDF files, not historical dates. Only state establishment years or founding dates if they are explicitly written as such in the source text."""
+Answer ONLY using provided context. Be detailed, factual, professional. Use same language as user.
+CRITICAL RULES:
+- NEVER open your answer with "I could not find" or any disclaimer when sources are provided. Start directly with the answer.
+- Say "I could not find verified information." ONLY if context is completely absent or entirely off-topic.
+- For lists (museums, tenders, schemes): list every item found in context using bullet points, then include the source URL.
+- NEVER use "Published Year", "Size", "SizeType", or file metadata as facts. Only use dates explicitly stated as establishment/founding years."""
 
 # Response cache for vector search
 _vector_response_cache = {}
@@ -70,12 +90,15 @@ def _generate_vector_answer_sync(question, vector_results, language, conversatio
     Returns:
         Generated answer string
     """
-    # Format vector results as context — clean junk metadata before passing to LLM
+    # Format vector results as context — clean junk metadata, discard empty chunks
     context_items = []
     for result in vector_results:
+        cleaned = _clean_retrieved_text(result.get("text", ""))
+        if not _is_useful_chunk(cleaned):
+            continue
         context_items.append({
             "title": result.get("title", ""),
-            "snippet": _clean_retrieved_text(result.get("text", "")),
+            "snippet": cleaned,
             "link": result.get("url", "")
         })
 
@@ -95,7 +118,7 @@ def _generate_vector_answer_sync(question, vector_results, language, conversatio
             f"Source: {item['title']}\n{item['snippet'][:800]}"
             for item in context_items[:5]
         ])
-        user_prompt = f"Question: {question}\n\nContext:\n{context_text}\n\nProvide a detailed, comprehensive answer covering all relevant information from the context. WARNING: Fields like 'Published Year', 'Size', 'SizeType' in the context are document/file metadata — do NOT use them as establishment dates, founding years, or museum facts. Only use facts that are explicitly stated as such."
+        user_prompt = f"Question: {question}\n\nContext:\n{context_text}\n\nStart your answer directly — do NOT open with 'I could not find' or any disclaimer. List every museum/item found in context using bullet points. Include source URL at the end. WARNING: 'Published Year', 'Size', 'SizeType' are PDF metadata — ignore them as facts."
         system_prompt = FAST_SYSTEM_PROMPT
 
     # Build messages
@@ -165,11 +188,13 @@ _MIN_CONTENT_LENGTH = 80
 
 def _strip_fallback_phrase(answer: str) -> tuple:
     """
-    If the LLM appended the fallback phrase after real content, remove it.
+    Remove the fallback phrase whether it appears at the start or end of the answer.
 
     Returns (cleaned_answer, phrase_found).
-    - If substantial content exists before the phrase, strip the phrase and return the good content.
-    - If the whole answer is essentially just the phrase, keep it (signals true fallback needed).
+    Cases handled:
+      - Phrase at END  : "Here are museums... I could not find..." → keep content before phrase
+      - Phrase at START: "I could not find... Here are museums..." → keep content after phrase
+      - Phrase only    : whole answer is the phrase → keep as-is (triggers web fallback)
     """
     lower = answer.lower()
     pos = lower.find(_FALLBACK_PHRASE)
@@ -177,9 +202,22 @@ def _strip_fallback_phrase(answer: str) -> tuple:
         return answer, False
 
     content_before = answer[:pos].strip()
+
+    # Find where the text resumes after the phrase (skip trailing punctuation/newlines)
+    after_pos = pos + len(_FALLBACK_PHRASE)
+    while after_pos < len(answer) and answer[after_pos] in '.\n\r !?':
+        after_pos += 1
+    content_after = answer[after_pos:].strip()
+
+    # Phrase at END — real content came before it
     if len(content_before) >= _MIN_CONTENT_LENGTH:
         return content_before, True
 
+    # Phrase at START — real content follows it
+    if len(content_after) >= _MIN_CONTENT_LENGTH:
+        return content_after, True
+
+    # Whole answer is essentially just the phrase — signal true fallback needed
     return answer, True
 
 

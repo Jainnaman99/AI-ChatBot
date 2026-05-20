@@ -507,7 +507,14 @@ async def chat_hybrid_context(req: ChatContextRequest, request: Request):
                 search_query = f"{' '.join(recent_user_messages)} {req.message}"
 
     # Try vector search first with reasonable similarity threshold
-    vector_results = await vector_service.search(search_query, top_k=5, min_similarity=0.50)
+    raw_results = await vector_service.search(search_query, top_k=10, min_similarity=0.50)
+
+    # Drop empty collection-browser pages (e.g. museumsofindia "0 records" pages)
+    _EMPTY_PAGE_MARKERS = ("0 records", "couldn't find any matches", "0 - 0 of 0")
+    vector_results = [
+        r for r in raw_results
+        if not any(m in r.get("text", "").lower() for m in _EMPTY_PAGE_MARKERS)
+    ][:5]
 
     # Decide if vector results are good enough
     use_vector = vector_results and len(vector_results) >= 2
