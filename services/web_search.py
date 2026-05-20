@@ -27,12 +27,12 @@ CACHE_SIZE = 100
 CACHE_TTL = 300  # 5 minutes in seconds
 
 def _is_trusted_domain(url: str) -> bool:
-    """Return True only if URL's domain exactly matches a trusted site (no subdomains)."""
+    """Return True if URL's domain is a trusted site or a subdomain of one."""
     try:
         netloc = urlparse(url).netloc.lower()
         if netloc.startswith("www."):
             netloc = netloc[4:]
-        return netloc in TRUSTED_SITES
+        return any(netloc == site or netloc.endswith("." + site) for site in TRUSTED_SITES)
     except Exception:
         return False
 

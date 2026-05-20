@@ -16,13 +16,27 @@ def _get_cache_key(question: str, language: str) -> str:
     combined = f"{question.lower().strip()}:{language}"
     return hashlib.md5(combined.encode()).hexdigest()
 
+_FALLBACK_PHRASE = "could not find verified information"
+_MIN_CONTENT_LENGTH = 80
+
+
+def _strip_fallback_phrase(answer: str) -> str:
+    """Remove trailing fallback phrase when real content precedes it."""
+    lower = answer.lower()
+    pos = lower.find(_FALLBACK_PHRASE)
+    if pos == -1:
+        return answer
+    content_before = answer[:pos].strip()
+    return content_before if len(content_before) >= _MIN_CONTENT_LENGTH else answer
+
+
 def _generate_answer_sync(question, context, language):
     """Synchronous LLM generation (used internally)"""
     if not context:
-        return """
-        I could not find verified information from trusted Ministry of Culture sources for this query.
-        Please try rephrasing your question.
-        """
+        return (
+            "I could not find relevant information about this topic from trusted "
+            "Ministry of Culture sources. Please try rephrasing your question."
+        )
 
     user_prompt = build_user_prompt(
         question=question,
@@ -67,6 +81,7 @@ async def generate_answer(question, context, language):
         context,
         language
     )
+    answer = _strip_fallback_phrase(answer)
 
     # Cache the response
     if len(_response_cache) >= RESPONSE_CACHE_SIZE:

@@ -43,8 +43,9 @@ def _clean_retrieved_text(text: str) -> str:
 
 # Speed-optimized shorter system prompt for vector search (reduces context size)
 FAST_SYSTEM_PROMPT = """You are Ministry of Culture India AI assistant.
-Answer ONLY using provided context. If insufficient, say: "I could not find verified information."
+Answer ONLY using provided context. Say "I could not find verified information." ONLY when context is completely absent or irrelevant — NOT when you have partial information.
 Be detailed, factual, professional. Provide comprehensive answers covering all relevant aspects. Use same language as user.
+For tenders, schemes, or lists: share ALL items found in the context and include the source URL at the end so the user can view the full list.
 CRITICAL: NEVER use "Published Year", "Size", or any document/file metadata as facts about museums or monuments. These refer to PDF files, not historical dates. Only state establishment years or founding dates if they are explicitly written as such in the source text."""
 
 # Response cache for vector search
@@ -158,6 +159,29 @@ def _generate_vector_answer_sync(question, vector_results, language, conversatio
 
 _FALLBACK_PHRASE = "could not find verified information"
 
+# Minimum chars of real content that makes a response worth keeping
+_MIN_CONTENT_LENGTH = 80
+
+
+def _strip_fallback_phrase(answer: str) -> tuple:
+    """
+    If the LLM appended the fallback phrase after real content, remove it.
+
+    Returns (cleaned_answer, phrase_found).
+    - If substantial content exists before the phrase, strip the phrase and return the good content.
+    - If the whole answer is essentially just the phrase, keep it (signals true fallback needed).
+    """
+    lower = answer.lower()
+    pos = lower.find(_FALLBACK_PHRASE)
+    if pos == -1:
+        return answer, False
+
+    content_before = answer[:pos].strip()
+    if len(content_before) >= _MIN_CONTENT_LENGTH:
+        return content_before, True
+
+    return answer, True
+
 
 async def _web_search_fallback(question: str, language: str) -> str:
     """Search trusted sites via web and generate an answer from the results."""
@@ -195,11 +219,18 @@ async def generate_vector_answer(question, vector_results, language, conversatio
             language,
             conversation_history
         )
-        # LLM couldn't answer from context — retry with web search
-        if _FALLBACK_PHRASE in answer.lower():
-            web_answer = await _web_search_fallback(question, language)
-            if web_answer:
-                answer = web_answer
+
+        # LLM appended the fallback phrase — try to strip it first
+        cleaned, phrase_found = _strip_fallback_phrase(answer)
+        if phrase_found:
+            if len(cleaned.strip()) >= _MIN_CONTENT_LENGTH:
+                # Good content exists — just drop the trailing phrase
+                answer = cleaned
+            else:
+                # Genuinely couldn't answer — try web search
+                web_answer = await _web_search_fallback(question, language)
+                if web_answer:
+                    answer = web_answer
 
     if history_len == 0:
         if len(_vector_response_cache) >= VECTOR_CACHE_SIZE:

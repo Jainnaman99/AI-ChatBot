@@ -507,10 +507,9 @@ async def chat_hybrid_context(req: ChatContextRequest, request: Request):
                 search_query = f"{' '.join(recent_user_messages)} {req.message}"
 
     # Try vector search first with reasonable similarity threshold
-    vector_results = await vector_service.search(search_query, top_k=5, min_similarity=0.55)
+    vector_results = await vector_service.search(search_query, top_k=5, min_similarity=0.50)
 
     # Decide if vector results are good enough
-    # Consider results good if we have at least 2 results with similarity > 0.55
     use_vector = vector_results and len(vector_results) >= 2
 
     if use_vector:
@@ -557,7 +556,7 @@ async def chat_hybrid_context(req: ChatContextRequest, request: Request):
     else:
         # Vector search insufficient - fallback to real-time web search
         # Use english_query so Serper finds results on English Ministry websites
-        web_results = await search_web(english_query)
+        web_results = await search_web(english_query, max_results=5)
 
         if conversation_history:
             answer = await generate_context_aware_answer(
@@ -651,7 +650,7 @@ async def search(req: SearchRequest, request: Request):
     fetch_k = max(offset + page_size, 20)
 
     vector_service = get_vector_search_service()
-    raw_vector = await vector_service.search(english_query, top_k=fetch_k, min_similarity=0.55)
+    raw_vector = await vector_service.search(english_query, top_k=fetch_k, min_similarity=0.50)
     all_vector = [
         r for r in raw_vector
         if ".pdf" not in r["url"].lower()
@@ -675,7 +674,7 @@ async def search(req: SearchRequest, request: Request):
         answer = None
         if is_question and page == 1:
             # Use only high-confidence chunks for LLM answer generation
-            llm_chunks = [r for r in all_vector if r["similarity"] >= 0.65] or all_vector[:3]
+            llm_chunks = [r for r in all_vector if r["similarity"] >= 0.60] or all_vector[:3]
             answer_en = await generate_vector_answer(
                 question=english_query,
                 vector_results=llm_chunks[:5],
@@ -732,7 +731,7 @@ async def search(req: SearchRequest, request: Request):
     # to add as additional sources alongside the answer
     answer = None
     if is_question:
-        broader_vector = await vector_service.search(english_query, top_k=10, min_similarity=0.55)
+        broader_vector = await vector_service.search(english_query, top_k=10, min_similarity=0.50)
         broader_vector = [
             r for r in broader_vector
             if ".pdf" not in r["url"].lower()
