@@ -65,10 +65,14 @@ class VectorSearchService:
             results['distances'],
             results['ids']
         )):
-            # Convert distance to similarity (ChromaDB uses L2 distance)
-            # Smaller distance = higher similarity
-            # Approximate similarity: 1 / (1 + distance)
-            similarity = 1 / (1 + distance)
+            # Convert L2 distance to cosine similarity.
+            # all-MiniLM-L6-v2 produces L2-normalised (unit) vectors, so the
+            # exact relationship holds: cosine_sim = 1 - (L2_dist² / 2)
+            # Range: 1.0 (identical) → 0.0 (orthogonal) → -1.0 (opposite)
+            similarity = 1.0 - (distance ** 2) / 2.0
+
+            # Previous approximation (kept for reference):
+            # similarity = 1 / (1 + distance)
 
             # Filter by threshold
             if similarity >= threshold:
